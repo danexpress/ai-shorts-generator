@@ -29,6 +29,25 @@ test('HTTP login sends a password, attaches the token, and revokes it on logout'
   assert.equal(calls[3].headers.Authorization, undefined);
 });
 
+test('HTTP sends video bytes and requests a project playback link with bearer auth', async () => {
+  const calls = [];
+  const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch: async (url, init) => {
+    calls.push({ url, ...init });
+    return response(url.endsWith('/google') ? { access_token: 'demo-token' } : { url: '/v1/media/project?expires=123&signature=abc', expiresAt: 123000 });
+  }});
+  await api.signIn({ email: 'maya@example.com', password: 'secret' });
+  const file = new Blob(['video-bytes'], { type: 'video/mp4' });
+  await api.uploadMedia('upload-1', file);
+  await api.getProjectPlayback('project-1');
+  assert.equal(calls[1].url, 'http://api.test/v1/uploads/upload-1/media');
+  assert.equal(calls[1].headers.Authorization, 'Bearer demo-token');
+  assert.equal(calls[1].headers['Content-Type'], 'video/mp4');
+  assert.equal(calls[1].body, file);
+  assert.equal(calls[2].url, 'http://api.test/v1/projects/project-1/playback');
+  assert.equal(calls[2].method, 'POST');
+  assert.equal(calls[2].headers.Authorization, 'Bearer demo-token');
+});
+
 for (const code of ['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED']) {
   test(`HTTP ${code} clears the token`, async () => {
     let fail = false;
@@ -126,6 +145,20 @@ test('page shows backend outage and clears password after unsuccessful login', a
   assert.equal(page.state.loginBusy, false);
 });
 
+test('clip preview uses the selected local video and seeks to the suggested clip', async t => {
+  const page = component({ ...S, createApi: () => ({}) });
+  t.after(() => page.componentWillUnmount());
+  page.setState({
+    route: 'suggestions', projectId: 'project-1', previewUrls: { 'project-1': 'blob:source-video' },
+    clipsRes: { clips: [{ id: 'clip-1', rank: 1, start: 12, end: 32, duration: 20, hook: 'A useful hook', reason: 'A complete thought', combined: 90, scores: { hook: 90, value: 90, standalone: 90, visual: 90 } }] },
+  });
+  const clip = page.renderVals().clips[0];
+  assert.equal(clip.hasVideo, true);
+  assert.equal(clip.videoUrl, 'blob:source-video#t=12,32');
+  page.setState({ previewId: 'clip-1' });
+  assert.equal(page.renderVals().pv.videoUrl, 'blob:source-video#t=12,32');
+});
+
 test('page and HTTP client work with a live isolated FastAPI backend', { timeout: 20000 }, async t => {
   const backend = path.resolve(__dirname, '../backend');
   const python = path.join(backend, '.venv/bin/python');
@@ -165,12 +198,17 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   assert.ok(page.state.clipsRes.clips.length > 0);
   assert.ok(page.state.transcript.segments.length > 0);
   assert.equal(page.renderVals().tabs.length, 1);
-  page.setNp({ source: { fileName: 'demo.mp4', title: 'HTTP integration demo', mimeType: 'video/mp4', sizeBytes: 1000, durationSec: 300, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true } });
+  page.setState({ pendingFile: new Blob([new Uint8Array(12)], { type: 'video/mp4' }) });
+  page.setNp({ source: { fileName: 'demo.mp4', title: 'HTTP integration demo', mimeType: 'video/mp4', sizeBytes: 12, durationSec: 300, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true } });
   await page.start();
   assert.equal(page.state.route, 'processing');
   assert.equal(page.state.uploading, false);
   assert.equal(page.state.np.busy, false);
   assert.equal((await page.api.getStatus(page.state.projectId)).status, 'transcribing');
+  const playback = await page.api.getProjectPlayback(page.state.projectId);
+  const mediaResponse = await fetch(new URL(playback.url, baseUrl), { headers: { Range: 'bytes=0-4' } });
+  assert.equal(mediaResponse.status, 206);
+  assert.equal((await mediaResponse.arrayBuffer()).byteLength, 5);
   await page.cancel();
   assert.equal(page.state.status.status, 'canceled');
   await page.signOut();

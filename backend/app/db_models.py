@@ -46,6 +46,7 @@ class UserRecord(Base):
     invited: Mapped[bool] = mapped_column(Boolean)
     active: Mapped[bool] = mapped_column(Boolean)
     limitMinutes: Mapped[int] = mapped_column("limit_minutes", Integer)
+    unlimitedUsage: Mapped[bool] = mapped_column("unlimited_usage", Boolean, default=False)
     passwordHash: Mapped[str] = mapped_column("password_hash", String(255))
 
 
@@ -95,6 +96,23 @@ class UploadRecord(Base):
     userId: Mapped[str] = mapped_column("user_id", ForeignKey("users.id"), index=True)
     uploadUrl: Mapped[str] = mapped_column("upload_url", Text)
     expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger)
+    storedName: Mapped[str | None] = mapped_column("stored_name", String(80))
+    contentType: Mapped[str | None] = mapped_column("content_type", String(128))
+
+
+class RenderRecord(Base):
+    __tablename__ = "renders"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    projectId: Mapped[str] = mapped_column("project_id", ForeignKey("projects.id"), index=True)
+    userId: Mapped[str] = mapped_column("user_id", ForeignKey("users.id"), index=True)
+    clipId: Mapped[str] = mapped_column("clip_id", String(40))
+    storedName: Mapped[str] = mapped_column("stored_name", String(80))
+    fileName: Mapped[str] = mapped_column("file_name", String(255))
+    resolution: Mapped[int] = mapped_column(Integer)
+    durationSec: Mapped[float] = mapped_column("duration_sec", Float)
+    sizeBytes: Mapped[int] = mapped_column("size_bytes", BigInteger)
+    createdAt: Mapped[int] = mapped_column("created_at", BigInteger, index=True)
+    expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger, index=True)
 
 
 class TranscriptRecord(Base):

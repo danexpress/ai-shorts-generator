@@ -11,6 +11,17 @@ class Settings:
             "sqlite+pysqlite:///" + str(Path(__file__).resolve().parents[1] / "ai_shorts.db"),
         )
     )
+    media_dir: Path = field(
+        default_factory=lambda: (
+            Path(os.environ.get("MEDIA_DIR", str(Path(__file__).resolve().parents[1] / "media")))
+            .expanduser()
+            .resolve()
+        )
+    )
+    media_signing_key: str = field(
+        default_factory=lambda: os.environ.get("MEDIA_SIGNING_KEY", "local-development-media-key")
+    )
+    ffmpeg_binary: str | None = field(default_factory=lambda: os.environ.get("FFMPEG_BIN"))
     seed_demo_data: bool = field(
         default_factory=lambda: (
             os.environ.get("SEED_DEMO_DATA", "true").lower() in {"1", "true", "yes"}
@@ -22,6 +33,7 @@ class Settings:
     analysis_seconds: float = 3
     source_retention_hours: int = 24
     analysis_retention_days: int = 30
+    render_retention_days: int = 7
     history_retention_days: int = 90
     youtube_import: bool = False
     # Explicit allowlist: no wildcard origins with browser credentials.

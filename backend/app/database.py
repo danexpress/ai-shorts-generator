@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Lock
 
-from sqlalchemy import create_engine, event, update
+from sqlalchemy import create_engine, event, inspect, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -47,6 +47,23 @@ class Database:
 
     def initialize(self):
         Base.metadata.create_all(self.engine)
+        # Additive migration for databases created before unlimited creator usage
+        # was supported. This ALTER is supported by SQLite and PostgreSQL.
+        if "unlimited_usage" not in {
+            column["name"] for column in inspect(self.engine).get_columns("users")
+        }:
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "ALTER TABLE users ADD COLUMN unlimited_usage BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+        upload_columns = {column["name"] for column in inspect(self.engine).get_columns("uploads")}
+        with self.engine.begin() as connection:
+            if "stored_name" not in upload_columns:
+                connection.exec_driver_sql("ALTER TABLE uploads ADD COLUMN stored_name VARCHAR(80)")
+            if "content_type" not in upload_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE uploads ADD COLUMN content_type VARCHAR(128)"
+                )
         try:
             with self.sessions.begin() as session:
                 session.add(DatabaseState(id=1, revision=0, demoSeeded=False))

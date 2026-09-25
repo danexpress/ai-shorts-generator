@@ -1,10 +1,10 @@
 from pathlib import PurePath
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from ..auth import StoreDep, UserDep
 from ..errors import ApiError
-from ..models import Project, UploadRequest, UploadSession
+from ..models import MediaUploadResult, Project, UploadRequest, UploadSession
 from ..store import oid
 
 router = APIRouter(prefix="/v1/uploads", tags=["Uploads"])
@@ -36,7 +36,7 @@ def validate_media(body: UploadRequest):
 
 @router.post("", response_model=UploadSession, operation_id="createUpload")
 def create_upload(body: UploadRequest, store: StoreDep, user: UserDep):
-    """Demo metadata upload: no video is stored or probed in this demo backend."""
+    """Validate metadata and create a local upload session."""
     validate_media(body)
     store.quota(user, body.durationSec)
     p = store.new_project(user, body)
@@ -45,11 +45,56 @@ def create_upload(body: UploadRequest, store: StoreDep, user: UserDep):
         "uploadId": upload_id,
         "projectId": p.id,
         "userId": user.id,
-        "uploadUrl": f"mock://upload/{oid('obj')}",
+        "uploadUrl": f"/v1/uploads/{upload_id}/media",
         "expiresAt": store.now() + store.settings.upload_ttl_seconds * 1000,
     }
     store.add_upload(upload)
     return {**upload, "project": store.project_view(p)}
+
+
+@router.post("/{id}/media", response_model=MediaUploadResult, operation_id="uploadMedia")
+async def upload_media(id: str, request: Request, store: StoreDep, user: UserDep):
+    """Stream the uploaded source into the configured local media directory."""
+    upload = store.upload(id)
+    if not upload or upload.userId != user.id:
+        raise ApiError("NOT_FOUND", "Upload not found.", 404)
+    if upload.expiresAt <= store.now():
+        raise ApiError("INVALID_STATE", "The upload link expired. Start again.", 409)
+    project = store.owned(user, upload.projectId)
+    mime = request.headers.get("content-type", "").split(";", 1)[0].lower()
+    suffix = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}.get(mime)
+    if not suffix:
+        raise ApiError("UNSUPPORTED_MEDIA", "Upload an MP4, MOV or WebM video.", 415)
+    declared = request.headers.get("content-length")
+    if declared and int(declared) > 4 * 1024**3:
+        raise ApiError("SOURCE_TOO_LARGE", "Files can be up to 4 GiB.", 413)
+
+    media_dir = store.settings.media_dir / "sources"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{project.id}{suffix}"
+    target = media_dir / stored_name
+    temporary = target.with_suffix(target.suffix + ".part")
+    received = 0
+    try:
+        with temporary.open("wb") as output:
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > min(project.sizeBytes, 4 * 1024**3):
+                    raise ApiError(
+                        "SOURCE_TOO_LARGE", "Uploaded bytes exceed the declared file size.", 413
+                    )
+                output.write(chunk)
+        if received != project.sizeBytes:
+            raise ApiError(
+                "INVALID_INPUT", "Uploaded byte count does not match the selected file.", 422
+            )
+        temporary.replace(target)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    upload.storedName = stored_name
+    upload.contentType = mime
+    return {"ok": True, "bytes": received}
 
 
 @router.post("/{id}/complete", response_model=Project, operation_id="completeUpload")
@@ -60,5 +105,9 @@ def complete_upload(id: str, store: StoreDep, user: UserDep):
     p = store.owned(user, upload.projectId)
     if upload.expiresAt <= store.now():
         raise ApiError("INVALID_STATE", "The upload link expired. Start again.", 409)
+    if not upload.storedName:
+        raise ApiError(
+            "INVALID_STATE", "Upload the source video before completing this upload.", 409
+        )
     p.sourceReady = True
     return store.project_view(p)

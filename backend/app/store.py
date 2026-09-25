@@ -23,6 +23,7 @@ from .db_models import (
     JobRecord,
     LedgerRecord,
     ProjectRecord,
+    RenderRecord,
     TokenRecord,
     TranscriptRecord,
     UploadRecord,
@@ -190,11 +191,13 @@ class Store:
         used = math.ceil(self.used_seconds(user) / 60)
         return {
             "usedMinutes": used,
-            "limitMinutes": user.limitMinutes,
-            "remainingMinutes": max(0, user.limitMinutes - used),
+            "limitMinutes": None if user.unlimitedUsage else user.limitMinutes,
+            "remainingMinutes": None if user.unlimitedUsage else max(0, user.limitMinutes - used),
         }
 
     def quota(self, user: UserRecord, seconds: float):
+        if user.unlimitedUsage:
+            return
         if math.ceil((self.used_seconds(user) + seconds) / 60) > user.limitMinutes:
             raise ApiError(
                 "MONTHLY_LIMIT_REACHED", "This source exceeds your monthly allowance.", 402
@@ -398,6 +401,13 @@ class Store:
 
     def expire(self):
         now = self.now()
+        expired_renders = self.db.scalars(select(RenderRecord).where(RenderRecord.expiresAt <= now))
+        render_root = (self.settings.media_dir / "renders").resolve()
+        for render in expired_renders:
+            path = (render_root / render.storedName).resolve()
+            if path.parent == render_root:
+                path.unlink(missing_ok=True)
+            self.db.delete(render)
         for p in self.db.scalars(select(ProjectRecord).where(ProjectRecord.status != "deleted")):
             if p.status == "deleted":
                 continue
@@ -405,6 +415,7 @@ class Store:
                 self.delete(p)
                 continue
             if p.sourceExpiresAt is not None and now >= p.sourceExpiresAt:
+                self.purge_source(p)
                 p.sourceExpired = True
             if p.analysisExpiresAt is not None and now >= p.analysisExpiresAt:
                 job = self.project_job(p.id, active=True)
@@ -624,8 +635,27 @@ class Store:
                 job.update(state="canceled", finishedAt=self.now())
                 self.release_job(job)
         self.purge_content(p)
+        self.purge_source(p)
+        render_root = (self.settings.media_dir / "renders").resolve()
+        renders = self.db.scalars(select(RenderRecord).where(RenderRecord.projectId == p.id))
+        for render in renders:
+            path = (render_root / render.storedName).resolve()
+            if path.parent == render_root:
+                path.unlink(missing_ok=True)
+            self.db.delete(render)
         p.update(status="deleted", name="Deleted project", sourceExpired=True)
         self.db.execute(delete(UploadRecord).where(UploadRecord.projectId == p.id))
+
+    def purge_source(self, p: ProjectRecord):
+        root = (self.settings.media_dir / "sources").resolve()
+        uploads = self.db.scalars(select(UploadRecord).where(UploadRecord.projectId == p.id))
+        for upload in uploads:
+            if upload.storedName:
+                path = (root / upload.storedName).resolve()
+                if path.parent == root:
+                    path.unlink(missing_ok=True)
+                upload.storedName = None
+                upload.contentType = None
 
     def seed(self):
         from .auth import hash_password
@@ -645,6 +675,7 @@ class Store:
                 invited=invited,
                 active=active,
                 limitMinutes=60,
+                unlimitedUsage=email == "maya@example.com",
                 passwordHash=hash_password("DemoPass123!"),
             )
             self.db.add(user)

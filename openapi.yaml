@@ -2,9 +2,8 @@
 openapi: 3.0.3
 info:
   title: AI Shorts Generator — frontend API contract
-  version: 1.1.0
-  description: 'Contract for the 19 operations in frontend/services.js, with the requested password and bearer-token
-    authentication added for the in-memory FastAPI backend in backend/.
+  version: 1.3.0
+  description: 'Contract for the frontend API, with password/bearer authentication and local media playback.
 
 
     Requests and responses are JSON. GET operations have no body or query parameters. Timestamps are Unix milliseconds;
@@ -23,11 +22,13 @@ info:
     the bearer token in memory and attaches it to subsequent requests. Refreshing the page requires sign-in again.
 
 
-    The SQLAlchemy backend persists application data across restarts and seeds demo content only once. Media processing remains a development simulator: uploaded media is not stored or probed,
-    uploadUrl is a mock URI, processing advances when polled, and transcripts/clips use demo content. YouTube import
-    is disabled by default and only simulated when enabled. Downloads return data URIs. There are no real transcription,
-    LLM, rendering or object-storage integrations. Rendering, preview, settings and operator APIs are outside these
-    19 operations.'
+    The SQLAlchemy backend persists application data and uploaded source files across restarts. Source media is stored
+    below MEDIA_DIR/sources using opaque filenames and is streamed with byte-range support through short-lived signed
+    playback links. Selected suggestions can be rendered with FFmpeg into vertical H.264/AAC MP4 files under
+    MEDIA_DIR/renders (backend/media/renders by default). Rendered files are retained for seven days, listed in project
+    downloads, and available through signed preview/download URLs. Processing/transcripts/suggestions remain demo
+    content; YouTube import is disabled by default and simulated when enabled. There is no real transcription, LLM or
+    object-storage integration.'
 servers:
 - url: /
   description: Same origin by default; createHttpApi can configure a baseUrl.
@@ -98,10 +99,9 @@ paths:
   /v1/uploads:
     post:
       operationId: createUpload
-      summary: Create a signed upload session
-      description: Validate supplied metadata and create an uploading demo project. No bytes are received or media
-        independently probed in this metadata-only implementation. Returns a mock:// upload URL with a 15-minute expiry,
-        matching the frontend simulated upload flow.
+      summary: Create an upload session
+      description: Validate supplied metadata and create an uploading project. Returns the protected relative endpoint
+        for streaming video bytes; upload sessions expire after 15 minutes.
       requestBody:
         required: true
         content:
@@ -133,8 +133,7 @@ paths:
     post:
       operationId: completeUpload
       summary: Complete an upload
-      description: No request body. Mark the simulated source ready; project remains uploading until processProject
-        is called. This metadata-only backend does not verify stored media.
+      description: No request body. Verify that source bytes were stored and mark the project ready for processing.
       parameters:
       - name: id
         in: path
@@ -158,6 +157,55 @@ paths:
           $ref: '#/components/responses/Error404'
         '409':
           $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/uploads/{id}/media:
+    post:
+      operationId: uploadMedia
+      summary: Upload source video bytes
+      description: Stream the source into the configured local media directory. The byte count must match the metadata
+        submitted to createUpload. Requires ownership of the upload session.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Upload session ID.
+      requestBody:
+        required: true
+        content:
+          video/mp4:
+            schema:
+              type: string
+              format: binary
+          video/quicktime:
+            schema:
+              type: string
+              format: binary
+          video/webm:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Video bytes stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadResult'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '415':
+          $ref: '#/components/responses/Error415'
+        '422':
+          $ref: '#/components/responses/Error422'
         '500':
           $ref: '#/components/responses/Error500'
   /v1/projects/youtube:
@@ -267,6 +315,72 @@ paths:
           $ref: '#/components/responses/Error404'
         '500':
           $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/playback:
+    post:
+      operationId: getProjectPlayback
+      summary: Create a short-lived source-video playback link
+      description: Requires project ownership. The signed URL supports browser video playback and byte-range seeking.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Project ID.
+      responses:
+        '200':
+          description: Signed source playback URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackLink'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/render:
+    post:
+      operationId: renderClip
+      summary: Render a suggested clip to vertical MP4
+      description: Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg cuts
+        the selected continuous source interval, center-crops it to 9:16, and saves the MP4 under MEDIA_DIR/renders.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderRequest'
+      responses:
+        '200':
+          description: Rendered short and signed preview/download links.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenderedClip'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '503':
+          description: FFmpeg renderer is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/projects/{id}/process:
     post:
       operationId: processProject
@@ -586,6 +700,117 @@ paths:
           $ref: '#/components/responses/Error422'
         '500':
           $ref: '#/components/responses/Error500'
+  /v1/media/{project_id}:
+    get:
+      operationId: streamProjectMedia
+      summary: Stream source video bytes
+      description: Public only through an expiring HMAC-signed playback URL returned by getProjectPlayback. Supports
+        single HTTP byte ranges for seeking. The signature becomes invalid when the source expires or is deleted.
+      security: []
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: expires
+        in: query
+        required: true
+        description: Unix expiration timestamp in seconds.
+        schema:
+          type: integer
+      - name: signature
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Source video.
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            video/quicktime:
+              schema:
+                type: string
+                format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Requested byte range of the source video.
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            video/quicktime:
+              schema:
+                type: string
+                format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '416':
+          description: Requested byte range is not satisfiable.
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/rendered/{render_id}:
+    get:
+      operationId: streamRenderedClip
+      summary: Preview or download a rendered short
+      description: Public only through an expiring signed URL returned by renderClip or getProjectDownloads. Supports
+        byte ranges. Use download=true to return attachment disposition.
+      security: []
+      parameters:
+      - name: render_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: expires
+        in: query
+        required: true
+        schema:
+          type: integer
+      - name: signature
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: download
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Rendered MP4.
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Requested byte range of rendered MP4.
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
   /v1/usage:
     get:
       operationId: getUsage
@@ -709,11 +934,15 @@ components:
         limitMinutes:
           type: integer
           minimum: 0
+          nullable: true
+          description: Null means this creator has no monthly processing limit.
         remainingMinutes:
           type: integer
           minimum: 0
-      description: Calendar-month allowance. usedMinutes is ceil(total processedSeconds + adjustmentSeconds divided
-        by 60). Default limit is 60 minutes.
+          nullable: true
+          description: Null when the creator has no monthly processing limit.
+      description: Calendar-month usage. A null limit and remaining balance mean no monthly cap.
+        Default limit is 60 minutes.
     LedgerEntry:
       type: object
       required:
@@ -765,9 +994,13 @@ components:
         limitMinutes:
           type: integer
           minimum: 0
+          nullable: true
+          description: Null means this creator has no monthly processing limit.
         remainingMinutes:
           type: integer
           minimum: 0
+          nullable: true
+          description: Null when the creator has no monthly processing limit.
         entries:
           type: array
           items:
@@ -987,8 +1220,8 @@ components:
           - true
         hasAudio:
           type: boolean
-      description: Untrusted browser-supplied metadata, not video bytes. The demo backend validates these fields,
-        including both stream-presence flags. Real media probing requires a future storage/worker integration.
+      description: Browser-probed metadata used for early validation. The backend verifies uploaded byte count and
+        extension but does not independently probe the media streams yet.
     UploadSession:
       type: object
       required:
@@ -1006,14 +1239,39 @@ components:
           description: Opaque identifier.
         uploadUrl:
           type: string
-          format: uri
-          description: mock:// URI in the demo backend; not an actual signed upload target.
+          description: Relative upload endpoint for sending the video bytes.
         expiresAt:
           type: integer
           format: int64
           description: Unix timestamp in milliseconds, not an ISO date string.
         project:
           $ref: '#/components/schemas/Project'
+    MediaUploadResult:
+      type: object
+      required:
+      - ok
+      - bytes
+      properties:
+        ok:
+          type: boolean
+          enum:
+          - true
+        bytes:
+          type: integer
+          minimum: 0
+    PlaybackLink:
+      type: object
+      required:
+      - url
+      - expiresAt
+      properties:
+        url:
+          type: string
+          description: Relative API path with a short-lived signature.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds.
     YoutubeRequest:
       type: object
       required:
@@ -1185,16 +1443,75 @@ components:
           enum:
           - txt
           - json
+          - mp4
         filename:
           type: string
         url:
           type: string
           format: uri
-          description: Downloadable URL; mock returns a data URI. Production should use short-lived signed URLs
-            or authenticated downloads.
+          description: Downloadable URL; transcript entries use data URIs and rendered MP4 entries use signed URLs.
         bytes:
           type: integer
           minimum: 0
+        downloadUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Optional attachment URL for rendered MP4 files.
+    RenderRequest:
+      type: object
+      required:
+      - clipId
+      properties:
+        clipId:
+          type: string
+        resolution:
+          type: integer
+          enum:
+          - 720
+          - 1080
+          default: 1080
+    RenderedClip:
+      type: object
+      required:
+      - id
+      - projectId
+      - clipId
+      - filename
+      - resolution
+      - durationSec
+      - bytes
+      - createdAt
+      - expiresAt
+      - url
+      - downloadUrl
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        clipId:
+          type: string
+        filename:
+          type: string
+        resolution:
+          type: integer
+          enum: [720, 1080]
+        durationSec:
+          type: number
+        bytes:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: integer
+        expiresAt:
+          type: integer
+        url:
+          type: string
+          format: uri
+        downloadUrl:
+          type: string
+          format: uri
     Scores:
       type: object
       required:
@@ -1373,6 +1690,8 @@ components:
               - UNAUTHENTICATED
               - INVALID_INPUT
               - INVALID_STATE
+              - RENDERER_UNAVAILABLE
+              - RENDER_FAILED
               - SERVER_ERROR
             message:
               type: string

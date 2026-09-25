@@ -84,4 +84,7 @@ def test_seeded_history_and_isolation(client, headers):
     assert {"ready", "failed", "expired"} <= {p["status"] for p in projects}
     assert all("userId" not in p and "sourceReady" not in p for p in projects)
     assert client.get("/v1/usage", headers=headers).json()["usedMinutes"] == 19
+    usage = client.get("/v1/usage", headers=headers).json()
+    assert usage["limitMinutes"] is None
+    assert usage["remainingMinutes"] is None
     assert client.get("/v1/projects", headers=login(client, "ops@example.com")).json() == []

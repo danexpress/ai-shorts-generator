@@ -1,6 +1,6 @@
 # AI Shorts Generator backend
 
-FastAPI implements the 19 operations in [`../openapi.yaml`](../openapi.yaml). SQLAlchemy stores users, bearer tokens, projects, uploads, transcripts, analysis runs, jobs, idempotency keys, and usage entries. SQLite is the default database. Demo content is seeded once in an empty database.
+FastAPI implements the operations in [`../openapi.yaml`](../openapi.yaml). SQLAlchemy stores users, bearer tokens, projects, uploads, transcripts, analysis runs, jobs, idempotency keys, and usage entries. SQLite is the default database. Demo content is seeded once in an empty database.
 
 ## Run
 
@@ -15,6 +15,8 @@ The default file is `backend/ai_shorts.db`, independent of the current working d
 `DATABASE_URL` accepts SQLAlchemy URLs. The engine, request-scoped sessions, ORM models, and queries use SQLAlchemy's cross-database APIs. SQLite connection settings are isolated in `app/database.py`. To use PostgreSQL later, install its DBAPI driver, configure a URL such as `postgresql+psycopg://user:password@host:5432/ai_shorts`, and apply schema migrations first. The default install includes SQLite's standard Python driver; a PostgreSQL driver is not included.
 
 The first server start creates the schema and demo rows. Set `SEED_DEMO_DATA=false` to disable demo seeding for a new database. Seeding runs once and only if no users exist; restarting does not overwrite or duplicate data. Schema changes require migrations: `create_all` creates missing tables but does not migrate existing ones.
+
+Uploaded source videos are stored by default under `backend/media/sources/` using opaque filenames. Set `MEDIA_DIR` to change the storage root. Browser playback streams byte ranges through short-lived signed URLs, allowing seeking without downloading the whole file. Select a suggestion and choose **Render Short** to create a vertical 1080p MP4 (or call `POST /v1/projects/{id}/render` with resolution `720` or `1080`). The backend stores rendered files under `backend/media/renders/` by default, exposes preview/download links in the project downloads, and removes rendered files after seven days or when the project is deleted. `imageio-ffmpeg` supplies FFmpeg; set `FFMPEG_BIN` to use a system FFmpeg binary instead. Set `MEDIA_SIGNING_KEY` to a private random value outside local development.
 
 Use one application process with SQLite for local development. SQLite serializes writes, and demo jobs advance as API requests arrive. PostgreSQL can be used for a multi-process deployment after adding its driver and migrations.
 
@@ -48,7 +50,7 @@ The frontend already uses password sign-in and adds the bearer token automatical
 
 ## Backend behavior
 
-The API validates upload metadata, but transfers no video bytes. Upload URLs use `mock://`. Transcript and clip results are demo content, and processing advances when API requests arrive. This backend has no real media probing, transcription, LLM, render, or object-storage services. Optional YouTube import only simulates creation and never fetches the supplied URL.
+Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions, metadata generation, and object storage are not implemented. Optional YouTube import only simulates creation and never fetches the supplied URL.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
 
@@ -57,7 +59,8 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - `app/database.py`: configurable engine and request transactions; SQLite options only.
 - `app/db_models.py`: SQLAlchemy tables and constraints.
 - `app/store.py`: database operations, seed content, simulated jobs, usage, retention.
-- `app/routers/`: auth, upload, project, transcript, analysis, and usage APIs.
+- `app/routers/`: auth, upload, project, media, render, transcript, analysis, and usage APIs.
+- `app/renderer.py`: FFmpeg vertical MP4 rendering.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 
-Run `make test` and `make lint` from the repository root. Tests cover all 19 routes, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
+Run `make test` and `make lint` from the repository root. Tests cover all 24 routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.

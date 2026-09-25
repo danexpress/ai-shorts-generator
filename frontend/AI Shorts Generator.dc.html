@@ -65,8 +65,8 @@
       <button class="btn btn-ghost" style="color:var(--color-text)" onClick="{{ goNew }}">New project</button>
     </nav>
     <div style="display:flex;align-items:center;gap:10px;font-size:13px">
-      <span>{{ usageUsed }} / {{ usageLimit }} min</span>
-      <span style="width:72px;height:4px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span>
+      <sc-if value="{{ isUnlimitedUsage }}" hint-placeholder-val="{{ false }}"><span>{{ usageUsed }} min · Unlimited</span></sc-if>
+      <sc-if value="{{ isLimitedUsage }}" hint-placeholder-val="{{ true }}"><span>{{ usageUsed }} / {{ usageLimit }} min</span><span style="width:72px;height:4px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span></sc-if>
     </div>
     <span class="tag tag-outline">Demo data</span>
     <button class="btn btn-secondary" onClick="{{ toggleTests }}">Tests</button>
@@ -85,9 +85,8 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px">
         <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:10px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Processing minutes</div>
-          <div style="font-family:var(--font-heading);font-size:34px;font-weight:600;line-height:1">{{ usageUsed }} <span style="font-size:20px;color:var(--color-neutral-700)">of {{ usageLimit }} used this month</span></div>
-          <span style="height:6px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span>
-          <div style="font-size:13px;color:var(--color-neutral-800)">{{ usageRemaining }} minutes left · resets {{ resetLabel }}</div>
+          <sc-if value="{{ isUnlimitedUsage }}" hint-placeholder-val="{{ false }}"><div style="font-family:var(--font-heading);font-size:34px;font-weight:600;line-height:1">{{ usageUsed }} <span style="font-size:20px;color:var(--color-neutral-700)">minutes used · Unlimited</span></div><div style="font-size:13px;color:var(--color-neutral-800)">No monthly processing limit</div></sc-if>
+          <sc-if value="{{ isLimitedUsage }}" hint-placeholder-val="{{ true }}"><div style="font-family:var(--font-heading);font-size:34px;font-weight:600;line-height:1">{{ usageUsed }} <span style="font-size:20px;color:var(--color-neutral-700)">of {{ usageLimit }} used this month</span></div><span style="height:6px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span><div style="font-size:13px;color:var(--color-neutral-800)">{{ usageRemaining }} minutes left · resets {{ resetLabel }}</div></sc-if>
         </div>
         <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:10px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Active job</div>
@@ -132,7 +131,7 @@
               </sc-for>
             </div>
           </div>
-          <p style="margin:0;font-size:13px;color:var(--color-neutral-800)">This demo uses sample transcripts and clips. Selected videos are not uploaded or analyzed.</p>
+          <p style="margin:0;font-size:13px;color:var(--color-neutral-800)">Source videos are saved on the backend. Render a selected clip to create a vertical MP4 in the backend media/renders folder, ready to download and post.</p>
           <sc-if value="{{ isUploadTab }}" hint-placeholder-val="{{ true }}">
             <sc-if value="{{ noSource }}" hint-placeholder-val="{{ true }}">
               <label style="position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:44px 20px;border:1px dashed var(--color-neutral-500);cursor:pointer;text-align:center" style-hover="border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 5%,transparent)">
@@ -140,7 +139,6 @@
                 <span style="font-family:var(--font-heading);font-weight:600;font-size:20px">Choose a video file</span>
                 <span style="font-size:13px;color:var(--color-neutral-700)">MP4, MOV or WebM · 30 s to 60 min · up to 4 GB</span>
               </label>
-              <button class="btn btn-ghost" style="align-self:flex-start" onClick="{{ useSample }}">Or use the sample: The Operator Hour, Ep. 42 (32:14)</button>
             </sc-if>
             <sc-if value="{{ probing }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:14px;color:var(--color-neutral-800)">Reading video metadata…</div>
@@ -273,8 +271,9 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:28px">
         <sc-for list="{{ clips }}" as="c" hint-placeholder-count="6">
           <article class="blueprint" style="display:flex;flex-direction:column;border-color:{{ c.border }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-            <div style="position:relative;aspect-ratio:16/9;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-text) 7%,transparent) 7px 8px);border-bottom:1px solid var(--color-divider);display:grid;place-items:center">
-              <span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700);white-space:nowrap">preview frame @ {{ c.startLabel }}</span>
+            <div style="position:relative;aspect-ratio:16/9;background:var(--color-neutral-100);border-bottom:1px solid var(--color-divider);display:grid;place-items:center;overflow:hidden">
+              <sc-if value="{{ c.hasVideo }}" hint-placeholder-val="{{ false }}"><video src="{{ c.videoUrl }}" controls playsinline preload="metadata" aria-label="Clip {{ c.rank }} video preview" style="width:100%;height:100%;object-fit:cover;background:#111"></video></sc-if>
+              <sc-if value="{{ c.noVideo }}" hint-placeholder-val="{{ true }}"><span style="padding:12px;font-size:12px;color:var(--color-neutral-700);text-align:center">Select a video in this browser to play this clip preview.</span></sc-if>
               <span style="position:absolute;top:10px;left:10px;font-family:var(--font-heading);font-weight:600;font-size:14px;padding:2px 8px;background:var(--color-bg);border:1px solid var(--color-divider)">#{{ c.rank }}</span>
               <span style="position:absolute;bottom:10px;right:10px;font-family:ui-monospace,monospace;font-size:12px;padding:2px 6px;background:var(--color-text);color:var(--color-bg)">{{ c.durationLabel }}</span>
             </div>
@@ -292,10 +291,16 @@
                 <sc-if value="{{ c.notSelected }}" hint-placeholder-val="{{ true }}"><button class="btn btn-primary" style="flex:1" onClick="{{ c.select }}">Select</button></sc-if>
                 <sc-if value="{{ c.selected }}" hint-placeholder-val="{{ false }}"><button class="btn btn-secondary" style="flex:1;border-color:var(--color-accent);color:var(--color-accent-800);background:var(--color-accent-100)" onClick="{{ c.select }}">Selected ✓</button></sc-if>
               </div>
+              <sc-if value="{{ c.canRender }}" hint-placeholder-val="{{ false }}"><button class="btn btn-primary" disabled="{{ c.isRendering }}" onClick="{{ c.render }}">{{ c.renderLabel }}</button></sc-if>
             </div>
           </article>
         </sc-for>
       </div>
+      <sc-if value="{{ hasRenderedClips }}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:12px"><h2 style="margin:0">Rendered Shorts</h2><p style="margin:0;font-size:13px;color:var(--color-neutral-700)">MP4 files are stored under <code>backend/media/renders/</code> by default. The configured MEDIA_DIR controls this location.</p>
+          <sc-for list="{{ renderedClips }}" as="r" hint-placeholder-count="0"><article class="blueprint" style="padding:16px;display:grid;grid-template-columns:minmax(180px,280px) 1fr;gap:18px;align-items:center"><video src="{{ r.url }}" controls playsinline preload="metadata" aria-label="Rendered Short {{ r.filename }}" style="width:100%;aspect-ratio:9/16;max-height:420px;background:#111"></video><div style="display:flex;flex-direction:column;gap:12px"><strong>{{ r.filename }}</strong><span style="font-size:13px;color:var(--color-neutral-700)">{{ r.bytesLabel }} · expires {{ r.expiresLabel }}</span><a class="btn btn-primary" href="{{ r.downloadUrl }}" download="{{ r.filename }}">Download MP4 to post</a></div></article></sc-for>
+        </section>
+      </sc-if>
       <p style="margin:0;font-size:12px;color:var(--color-neutral-700);font-family:ui-monospace,monospace">{{ runMeta }}</p>
     </div>
   </sc-if>
@@ -305,10 +310,9 @@
 <sc-if value="{{ previewOpen }}" hint-placeholder-val="{{ false }}">
   <div class="dialog-backdrop" onClick="{{ closePreview }}" style="z-index:40">
     <div role="dialog" aria-modal="true" aria-label="Clip preview" class="dialog blueprint" onClick="{{ stop }}" style="width:min(760px,100%);display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;background:var(--color-bg);padding:24px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-      <div class="blueprint" style="aspect-ratio:9/16;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-text) 7%,transparent) 7px 8px);display:flex;flex-direction:column;justify-content:space-between;padding:16px 12px;border-color:var(--color-accent)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <span style="font-family:var(--font-heading);font-weight:600;font-size:18px;line-height:1.1;background:var(--color-bg);padding:6px 8px">{{ pv.hook }}</span>
-        <span style="font-family:ui-monospace,monospace;font-size:10px;text-align:center;color:var(--color-neutral-700)">9:16 crop · {{ pv.framing }}</span>
-        <span style="font-family:var(--font-heading);font-weight:600;font-size:17px;line-height:1.15;text-align:center;background:var(--color-text);color:var(--color-bg);padding:6px 8px;margin-bottom:22%">{{ pv.caption }}</span>
+      <div class="blueprint" style="position:relative;aspect-ratio:9/16;background:#111;overflow:hidden;border-color:var(--color-accent)">
+        <sc-if value="{{ pv.hasVideo }}" hint-placeholder-val="{{ false }}"><video src="{{ pv.videoUrl }}" controls playsinline preload="metadata" aria-label="Playable clip preview" style="width:100%;height:100%;object-fit:cover"></video><span style="position:absolute;top:16px;left:12px;right:12px;font-family:var(--font-heading);font-weight:600;font-size:18px;line-height:1.1;background:var(--color-bg);padding:6px 8px">{{ pv.hook }}</span><span style="position:absolute;left:12px;right:12px;bottom:15%;font-family:var(--font-heading);font-weight:600;font-size:17px;line-height:1.15;text-align:center;background:var(--color-text);color:var(--color-bg);padding:6px 8px">{{ pv.caption }}</span></sc-if>
+        <sc-if value="{{ pv.noVideo }}" hint-placeholder-val="{{ true }}"><div style="height:100%;display:grid;place-items:center;padding:18px;color:white;text-align:center;font-size:13px">Upload a video in this browser to play this clip preview.</div></sc-if>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
         <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Suggestion #{{ pv.rank }} · {{ pv.range }} · {{ pv.duration }}</div>
@@ -354,7 +358,6 @@ const GOALS = [
   { id: 'entertaining', label: 'Entertaining', desc: 'Stories, humor, personality.' },
   { id: 'viral', label: 'Viral', desc: 'Immediate hooks, surprise, debate-worthy ideas from the source.' },
 ];
-const SAMPLE_SOURCE = { fileName: 'operator-hour-ep42.mp4', title: 'The Operator Hour — Ep. 42: Priya Raman on scaling to 500', mimeType: 'video/mp4', sizeBytes: 1.86e9, durationSec: 1934, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true };
 const STATUS_LABEL = { uploading: 'Uploading', transcribing: 'Transcribing', analyzing: 'Analyzing', ready: 'Ready', failed: 'Failed', canceled: 'Canceled', expired: 'Expired', draft: 'Draft' };
 const fmt = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; const p = (n) => String(n).padStart(2, '0'); return h ? h + ':' + p(m) + ':' + p(s) : m + ':' + p(s); };
 const fmtDate = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -366,7 +369,9 @@ class Component extends DCLogic {
   state = {
     route: 'boot', me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
     projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
+    previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
+    renderedClips: [], renderingId: null,
     np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
     regen: { goal: 'educational', instruction: '', avoid: '' },
     tests: { open: false, running: false, results: [] }, toast: null,
@@ -384,7 +389,16 @@ class Component extends DCLogic {
     };
     boot();
   }
-  componentWillUnmount() { clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); }
+  componentWillUnmount() { clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+
+  releasePreviewUrls() {
+    const urls = Object.values(this.state.previewUrls || {});
+    if (this.state.pendingPreviewUrl) urls.push(this.state.pendingPreviewUrl);
+    if (typeof URL !== 'undefined') urls.filter((url) => url.startsWith('blob:')).forEach((url) => URL.revokeObjectURL(url));
+    this.state.previewUrls = {};
+    this.state.pendingPreviewUrl = null;
+    this.state.pendingFile = null;
+  }
 
   notify(msg) { clearTimeout(this.toastTimer); this.setState({ toast: msg }); this.toastTimer = setTimeout(() => this.setState({ toast: null }), 3200); }
   async signIn(e) {
@@ -400,6 +414,7 @@ class Component extends DCLogic {
   }
   resetSession(message = null) {
     this.stopPolling();
+    this.releasePreviewUrls();
     this.setState({ route: 'login', me: null, loginPassword: '', loginError: message,
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -465,8 +480,26 @@ class Component extends DCLogic {
   }
   async loadClips(id) {
     try {
-      const res = await this.api.getClips(id);
-      this.setState((s) => ({ clipsRes: res, regen: { goal: res.goal || s.regen.goal, instruction: res.instruction || '', avoid: (res.avoid || []).join(', ') } }));
+      const [res, playback, downloads] = await Promise.all([
+        this.api.getClips(id),
+        this.api.getProjectPlayback(id).catch(() => null),
+        this.api.getProjectDownloads(id).catch(() => []),
+      ]);
+      const playbackUrl = playback ? new URL(playback.url, window.SHORTS_CONFIG.apiBaseUrl).href : null;
+      const renderedClips = downloads.filter((item) => item.kind === 'mp4').map((item) => ({
+        ...item, url: new URL(item.url, window.SHORTS_CONFIG.apiBaseUrl).href,
+        downloadUrl: new URL(item.downloadUrl || item.url, window.SHORTS_CONFIG.apiBaseUrl).href,
+      }));
+      this.setState((s) => {
+        const previousUrl = s.previewUrls[id];
+        if (playbackUrl && previousUrl && previousUrl.startsWith('blob:') && typeof URL !== 'undefined') URL.revokeObjectURL(previousUrl);
+        return {
+          clipsRes: res,
+          renderedClips,
+          previewUrls: playbackUrl ? { ...s.previewUrls, [id]: playbackUrl } : s.previewUrls,
+          regen: { goal: res.goal || s.regen.goal, instruction: res.instruction || '', avoid: (res.avoid || []).join(', ') },
+        };
+      });
     } catch (e) { if (!this.handleAuth(e)) this.notify(e.message); }
   }
   async loadTranscript(id) {
@@ -479,12 +512,14 @@ class Component extends DCLogic {
   onFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    if (this.state.pendingPreviewUrl && typeof URL !== 'undefined') URL.revokeObjectURL(this.state.pendingPreviewUrl);
     this.setNp({ probing: true, error: null, code: null, source: null });
     const url = URL.createObjectURL(file);
     const v = document.createElement('video');
     v.preload = 'metadata';
     const done = (ok) => {
-      URL.revokeObjectURL(url);
+      if (ok) this.setState({ pendingPreviewUrl: url, pendingFile: file });
+      else { if (typeof URL !== 'undefined') URL.revokeObjectURL(url); this.setState({ pendingPreviewUrl: null, pendingFile: null }); }
       this.setNp({ probing: false, source: { fileName: file.name, title: file.name.replace(/\.[^.]+$/, ''), mimeType: file.type, sizeBytes: file.size, durationSec: ok ? v.duration : 0, width: ok ? v.videoWidth : 0, height: ok ? v.videoHeight : 0, fps: 30, hasVideo: ok && v.videoWidth > 0, hasAudio: true } });
     };
     v.onloadedmetadata = () => done(true);
@@ -494,6 +529,8 @@ class Component extends DCLogic {
 
   async start() {
     const { np } = this.state;
+    const previewUrl = this.state.pendingPreviewUrl;
+    const file = this.state.pendingFile;
     const body = { goal: np.goal, instruction: np.instruction, avoid: parseAvoid(np.avoid) };
     this.setNp({ busy: true, error: null, code: null });
     try {
@@ -504,11 +541,10 @@ class Component extends DCLogic {
         this.afterStart();
         return;
       }
+      if (!file) throw new Error('Choose a source video file to upload.');
       const up = await this.api.createUpload(np.source);
-      this.setState({ projectId: up.projectId, project: up.project, route: 'processing', status: null, uploading: true, uploadPct: 0, transcript: null, clipsRes: null, selected: {} });
-      // The current backend accepts metadata only and returns a mock:// upload URL.
-      // Do not pretend to transfer bytes or simulate a browser upload timer.
-      if (!up.uploadUrl.startsWith('mock://')) throw new Error('This backend requires file transfer, which this demo does not support yet.');
+      this.setState((s) => ({ projectId: up.projectId, project: up.project, route: 'processing', status: null, uploading: true, uploadPct: 0, transcript: null, clipsRes: null, selected: {}, pendingPreviewUrl: null, pendingFile: null, previewUrls: previewUrl ? { ...s.previewUrls, [up.projectId]: previewUrl } : s.previewUrls }));
+      await this.api.uploadMedia(up.uploadId, file);
       await this.api.completeUpload(up.uploadId);
       const status = await this.api.processProject(up.projectId, body, { idempotencyKey: idem() });
       this.setState({ uploading: false, status });
@@ -546,6 +582,17 @@ class Component extends DCLogic {
       const it = items.find((i) => i.kind === kind);
       const a = document.createElement('a'); a.href = it.url; a.download = it.filename; document.body.appendChild(a); a.click(); a.remove();
     } catch (e) { this.notify(e.message); }
+  }
+
+  async renderClip(clipId) {
+    this.setState({ renderingId: clipId });
+    try {
+      const result = await this.api.renderClip(this.state.projectId, { clipId, resolution: 1080 });
+      this.notify('Short rendered and saved on the backend.');
+      await this.loadClips(this.state.projectId);
+      return result;
+    } catch (e) { if (!this.handleAuth(e)) this.notify(e.message); }
+    finally { this.setState({ renderingId: null }); }
   }
 
   async regenerate() {
@@ -587,6 +634,7 @@ class Component extends DCLogic {
     // new project
     const np = s.np;
     const src = np.source;
+    const unlimitedUsage = usage.limitMinutes === null;
     const remaining = usage.remainingMinutes;
     const srcMin = src ? Math.ceil(src.durationSec / 60) : 0;
     const canStart = !np.busy && (np.tab === 'upload' ? !!src : !!np.url.trim());
@@ -609,9 +657,9 @@ class Component extends DCLogic {
       };
     });
     let progress = 0;
-    if (s.uploading) progress = s.uploadPct * 0.12;
+    if (s.uploading) progress = Math.max(2, s.uploadPct * 0.12);
     else if (st) progress = st.status === 'ready' ? 100 : 12 + (st.progress || 0) * 88;
-    const statusText = s.uploading ? 'Preparing the demo project' :
+    const statusText = s.uploading ? 'Uploading source video to the backend' :
       statusKey === 'transcribing' ? 'Transcribing speech with word-level timestamps' :
       statusKey === 'analyzing' ? 'Scoring moments for hook, value, clarity and visuals' :
       statusKey === 'ready' ? (project.suggestionCount || 'Your') + ' suggestions ready' :
@@ -638,19 +686,30 @@ class Component extends DCLogic {
       s.transcript.segments.forEach((seg) => seg.words.forEach((w) => { if (w.s >= c.start - 0.01 && w.e <= c.end + 0.01) words.push(w.w); }));
       return words.join(' ');
     };
+    const projectPreviewUrl = s.previewUrls[s.projectId];
     const clips = (cr ? cr.clips : []).map((c) => ({
       rank: c.rank, hook: c.hook, reason: c.reason, combined: c.combined,
       startLabel: fmt(c.start), durationLabel: fmt(c.duration), range: fmt(c.start) + ' – ' + fmt(c.end),
+      hasVideo: !!projectPreviewUrl, noVideo: !projectPreviewUrl,
+      videoUrl: projectPreviewUrl ? projectPreviewUrl + '#t=' + c.start + ',' + c.end : '',
       scores: [{ label: 'Hook', value: c.scores.hook }, { label: 'Value', value: c.scores.value }, { label: 'Standalone clarity', value: c.scores.standalone }, { label: 'Visual quality', value: c.scores.visual }],
       selected: !!s.selected[c.id], notSelected: !s.selected[c.id],
+      isRendering: s.renderingId === c.id, canRender: !!s.selected[c.id],
+      renderLabel: s.renderingId === c.id ? 'Rendering MP4…' : 'Render Short (1080p)',
       border: s.selected[c.id] ? 'var(--color-accent)' : 'var(--color-divider)',
       preview: () => this.setState({ previewId: c.id }), select: () => selectClip(c.id),
+      render: () => this.renderClip(c.id),
+    }));
+    const renderedClips = s.renderedClips.map((r) => ({
+      ...r, bytesLabel: (r.bytes / 1e6).toFixed(1) + ' MB', expiresLabel: fmtDate(r.expiresAt),
     }));
     const regenerating = !!(st && st.stage && st.jobType === 'analysis');
     const pc = cr && s.previewId ? cr.clips.find((c) => c.id === s.previewId) : null;
     const excerpt = pc ? excerptFor(pc) : '';
     const pv = pc ? {
       rank: pc.rank, hook: pc.hook, reason: pc.reason, range: fmt(pc.start) + ' – ' + fmt(pc.end), duration: fmt(pc.duration),
+      hasVideo: !!projectPreviewUrl, noVideo: !projectPreviewUrl,
+      videoUrl: projectPreviewUrl ? projectPreviewUrl + '#t=' + pc.start + ',' + pc.end : '',
       framing: pc.scores.visual >= 80 ? 'face-tracked' : 'stable center', caption: excerpt.split(' ').slice(0, 3).join(' '),
       excerpt: excerpt || 'Loading transcript…', selectLabel: s.selected[pc.id] ? 'Unselect' : 'Select this clip',
       select: () => { selectClip(pc.id); this.setState({ previewId: null }); },
@@ -675,7 +734,8 @@ class Component extends DCLogic {
       signIn: (e) => this.signIn(e),
       // shell
       userName: me ? me.user.displayName : '', usageUsed: usage.usedMinutes, usageLimit: usage.limitMinutes, usageRemaining: remaining,
-      usagePct: Math.min(100, Math.round((usage.usedMinutes / usage.limitMinutes) * 100)),
+      isUnlimitedUsage: unlimitedUsage, isLimitedUsage: !unlimitedUsage,
+      usagePct: unlimitedUsage ? 0 : Math.min(100, Math.round((usage.usedMinutes / usage.limitMinutes) * 100)),
       monthLabel: now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), resetLabel: fmtDate(reset),
       goDashboard: () => { this.stopPolling(); this.go('dashboard'); },
       goNew: () => { this.stopPolling(); this.go('new'); },
@@ -697,9 +757,8 @@ class Component extends DCLogic {
         { label: 'File size', value: (src.sizeBytes / 1e9).toFixed(2) + ' GB' },
         { label: 'Est. processing', value: '~' + Math.max(1, Math.round(src.durationSec / 60 / 3.5)) + ' min' },
       ] : [],
-      allowanceText: src ? 'Uses ' + srcMin + ' of your ' + remaining + ' remaining processing minutes this month.' : '',
-      clearSource: () => this.setNp({ source: null, error: null, code: null }),
-      useSample: () => this.setNp({ source: SAMPLE_SOURCE, error: null, code: null }),
+      allowanceText: src ? (unlimitedUsage ? 'Unlimited monthly processing.' : 'Uses ' + srcMin + ' of your ' + remaining + ' remaining processing minutes this month.') : '',
+      clearSource: () => { if (this.state.pendingPreviewUrl && typeof URL !== 'undefined') URL.revokeObjectURL(this.state.pendingPreviewUrl); this.setState({ pendingPreviewUrl: null, pendingFile: null }); this.setNp({ source: null, error: null, code: null }); },
       onFile: (e) => this.onFile(e),
       npUrl: np.url, onUrl: (e) => this.setNp({ url: e.target.value }), npRights: np.rights, onRights: (e) => this.setNp({ rights: e.target.checked }),
       npError: np.error, npErrorCode: np.code,
@@ -720,7 +779,8 @@ class Component extends DCLogic {
       saveLabel: dirty ? 'Save ' + dirty + (dirty === 1 ? ' edit' : ' edits') : 'Saved',
       saveTranscript: () => this.saveTranscript(), downloadTxt: () => this.download('txt'), downloadJson: () => this.download('json'),
       // suggestions
-      clips, clipsKicker: cr ? cr.clips.length + ' suggestions · ' + (GOALS.find((g) => g.id === cr.goal) || { label: '' }).label + (cr.instruction ? ' · “' + cr.instruction + '”' : '') : 'Loading suggestions…',
+      clips, renderedClips, hasRenderedClips: renderedClips.length > 0,
+      clipsKicker: cr ? cr.clips.length + ' suggestions · ' + (GOALS.find((g) => g.id === cr.goal) || { label: '' }).label + (cr.instruction ? ' · “' + cr.instruction + '”' : '') : 'Loading suggestions…',
       clipsStale: !!(cr && cr.stale) && !regenerating,
       runMeta: cr ? 'run ' + cr.runId + ' · prompt ' + cr.promptVersion + ' · ' + cr.modelName : '',
       regenGoals: GOALS.map((g) => ({ label: g.label, pressed: String(s.regen.goal === g.id), bg: s.regen.goal === g.id ? 'var(--color-accent)' : 'transparent', fg: s.regen.goal === g.id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => this.setState((x) => ({ regen: { ...x.regen, goal: g.id } })) })),

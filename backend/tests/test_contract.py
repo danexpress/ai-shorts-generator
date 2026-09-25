@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import SOURCE, assert_error, rows
+from conftest import SOURCE, assert_error, ready, rows
 from jsonschema import Draft4Validator
 from openapi_spec_validator import validate
 
@@ -57,7 +57,7 @@ def test_openapi_valid_and_routes_match(client):
         for method, op in methods.items()
     }
     assert expected == actual
-    assert len(actual) == 19
+    assert len(actual) == 24
     assert generated["components"]["securitySchemes"]["bearerAuth"]["scheme"] == "bearer"
 
 
@@ -75,7 +75,13 @@ def test_every_protected_route_requires_bearer(client, path, method):
     assert_error(response, 401, "UNAUTHENTICATED")
 
 
-def test_every_operation_response_matches_root_spec(client, clock, database, app):
+def test_every_operation_response_matches_root_spec(client, clock, database, app, monkeypatch):
+    from app.routers import renders
+
+    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg):
+        destination.write_bytes(b"rendered mp4")
+
+    monkeypatch.setattr(renders, "render_short", fake_render)
     signin = check(
         client.post(
             "/v1/auth/google", json={"email": "maya@example.com", "password": "DemoPass123!"}
@@ -86,8 +92,41 @@ def test_every_operation_response_matches_root_spec(client, clock, database, app
     headers = {"Authorization": "Bearer " + signin["access_token"]}
     check(client.get("/v1/me", headers=headers), "/v1/me", "get")
     check(client.get("/v1/usage", headers=headers), "/v1/usage", "get")
+    render_project = ready(client, headers, clock)
+    render_clip = client.get(f"/v1/projects/{render_project}/clips", headers=headers).json()[
+        "clips"
+    ][0]
+    rendered = check(
+        client.post(
+            f"/v1/projects/{render_project}/render",
+            headers=headers,
+            json={"clipId": render_clip["id"]},
+        ),
+        "/v1/projects/{id}/render",
+        "post",
+    )
+    rendered_path, rendered_query = rendered["url"].split("?", 1)
+    rendered_params = dict(part.split("=", 1) for part in rendered_query.split("&"))
+    assert (
+        client.get(
+            rendered_path, params=rendered_params, headers={"Range": "bytes=0-2"}
+        ).status_code
+        == 206
+    )
     check(client.get("/v1/projects", headers=headers), "/v1/projects", "get")
-    up = check(client.post("/v1/uploads", headers=headers, json=SOURCE), "/v1/uploads", "post")
+    upload_source = {**SOURCE, "sizeBytes": 12}
+    up = check(
+        client.post("/v1/uploads", headers=headers, json=upload_source), "/v1/uploads", "post"
+    )
+    check(
+        client.post(
+            f"/v1/uploads/{up['uploadId']}/media",
+            headers={**headers, "Content-Type": "video/mp4"},
+            content=b"test-video!!",
+        ),
+        "/v1/uploads/{id}/media",
+        "post",
+    )
     check(
         client.post(f"/v1/uploads/{up['uploadId']}/complete", headers=headers),
         "/v1/uploads/{id}/complete",
@@ -95,6 +134,15 @@ def test_every_operation_response_matches_root_spec(client, clock, database, app
     )
     base = f"/v1/projects/{up['projectId']}"
     check(client.get(base, headers=headers), "/v1/projects/{id}", "get")
+    link = check(
+        client.post(base + "/playback", headers=headers),
+        "/v1/projects/{id}/playback",
+        "post",
+    )
+    media_path = link["url"].split("?", 1)[0]
+    media_query = dict(part.split("=", 1) for part in link["url"].split("?", 1)[1].split("&"))
+    streamed = client.get(media_path, params=media_query, headers={"Range": "bytes=2-5"})
+    assert streamed.status_code == 206 and streamed.content == b"st-v"
     check(
         client.post(base + "/process", headers=headers, json={"goal": "viral"}),
         "/v1/projects/{id}/process",

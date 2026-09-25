@@ -4,10 +4,13 @@ import re
 from urllib.parse import quote
 
 from fastapi import APIRouter
+from sqlalchemy import select
 
 from ..auth import StoreDep, UserDep
+from ..db_models import RenderRecord
 from ..errors import ApiError
 from ..models import Download, Transcript, TranscriptEdit
+from .media import media_signature
 
 router = APIRouter(prefix="/v1/projects", tags=["Transcripts"])
 
@@ -66,7 +69,7 @@ def downloads(id: str, store: StoreDep, user: UserDep):
         indent=2,
     )
     base = re.sub(r"[^a-zA-Z0-9_]+", "-", p.name).strip("-").lower() or "project"
-    return [
+    items = [
         {
             "kind": kind,
             "filename": f"{base}-transcript.{kind}",
@@ -78,3 +81,23 @@ def downloads(id: str, store: StoreDep, user: UserDep):
             ("json", "application/json", structured),
         ]
     ]
+    now = store.now()
+    renders = store.db.scalars(
+        select(RenderRecord)
+        .where(RenderRecord.projectId == id, RenderRecord.expiresAt > now)
+        .order_by(RenderRecord.createdAt.desc())
+    )
+    for render in renders:
+        expires = now // 1000 + 30 * 60
+        signature = media_signature(render.id, expires, store.settings.media_signing_key)
+        url = f"/v1/rendered/{render.id}?expires={expires}&signature={signature}"
+        items.append(
+            {
+                "kind": "mp4",
+                "filename": render.fileName,
+                "url": url,
+                "downloadUrl": url + "&download=true",
+                "bytes": render.sizeBytes,
+            }
+        )
+    return items

@@ -101,8 +101,8 @@ class User(BaseModel):
 
 class UsageSummary(BaseModel):
     usedMinutes: int
-    limitMinutes: int
-    remainingMinutes: int
+    limitMinutes: int | None
+    remainingMinutes: int | None
 
 
 class LedgerEntry(BaseModel):
@@ -173,6 +173,16 @@ class UploadSession(BaseModel):
     project: Project
 
 
+class PlaybackLink(BaseModel):
+    url: str
+    expiresAt: int
+
+
+class MediaUploadResult(BaseModel):
+    ok: bool
+    bytes: int
+
+
 class Status(BaseModel):
     projectId: str
     status: ProjectState
@@ -210,10 +220,30 @@ class Transcript(BaseModel):
 
 
 class Download(BaseModel):
-    kind: Literal["txt", "json"]
+    kind: Literal["txt", "json", "mp4"]
     filename: str
     url: str
     bytes: int
+    downloadUrl: str | None = None
+
+
+class RenderRequest(RequestModel):
+    clipId: str
+    resolution: Literal[720, 1080] = 1080
+
+
+class RenderedClip(BaseModel):
+    id: str
+    projectId: str
+    clipId: str
+    filename: str
+    resolution: Literal[720, 1080]
+    durationSec: float
+    bytes: int
+    createdAt: int
+    expiresAt: int
+    url: str
+    downloadUrl: str
 
 
 class Scores(BaseModel):

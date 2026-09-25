@@ -15,7 +15,7 @@ from .database import Database
 from .db_models import DatabaseState, UserRecord
 from .errors import ApiError
 from .models import ErrorResponse
-from .routers import analysis, auth, projects, transcripts, uploads, usage
+from .routers import analysis, auth, media, projects, renders, transcripts, uploads, usage
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        expose_headers=["Accept-Ranges", "Content-Range", "Content-Length"],
     )
 
     @app.exception_handler(ApiError)
@@ -120,6 +121,8 @@ def create_app(
     for router in (
         auth.router,
         uploads.router,
+        media.router,
+        renders.router,
         projects.router,
         transcripts.router,
         analysis.router,

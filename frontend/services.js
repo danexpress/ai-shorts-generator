@@ -52,6 +52,8 @@
     ACCOUNT_DISABLED: 'This account has been disabled. Contact the beta team.',
     UNAUTHENTICATED: 'Your session ended. Sign in again.',
     INVALID_INPUT: 'Some of the details aren’t valid.',
+    RENDERER_UNAVAILABLE: 'Video rendering is not available on this backend yet.',
+    RENDER_FAILED: 'The Short could not be rendered. Check the source video and try again.',
     INVALID_STATE: 'That action isn’t available right now.',
     NETWORK_ERROR: 'Can’t reach the server. Check your connection.',
     SERVER_ERROR: 'Something went wrong on our side. Try again.',
@@ -73,10 +75,13 @@
     ['signOut', 'POST', '/v1/auth/logout'],
     ['me', 'GET', '/v1/me'],
     ['createUpload', 'POST', '/v1/uploads'],
+    ['uploadMedia', 'POST', '/v1/uploads/{id}/media'],
     ['completeUpload', 'POST', '/v1/uploads/{id}/complete'],
     ['createYoutubeProject', 'POST', '/v1/projects/youtube'],
     ['listProjects', 'GET', '/v1/projects'],
     ['getProject', 'GET', '/v1/projects/{id}'],
+    ['getProjectPlayback', 'POST', '/v1/projects/{id}/playback'],
+    ['renderClip', 'POST', '/v1/projects/{id}/render'],
     ['deleteProject', 'DELETE', '/v1/projects/{id}'],
     ['processProject', 'POST', '/v1/projects/{id}/process'],
     ['retryProject', 'POST', '/v1/projects/{id}/retry'],
@@ -190,12 +195,14 @@
         if (accessToken) h.Authorization = 'Bearer ' + accessToken;
         if (name === 'signOut') accessToken = null;
         const sendBody = body !== undefined && verb !== 'GET';
-        if (sendBody) h['Content-Type'] = 'application/json';
+        if (name === 'uploadMedia') h['Content-Type'] = body.type || 'application/octet-stream';
+        else if (sendBody) h['Content-Type'] = 'application/json';
         if (opts.idempotencyKey) h['Idempotency-Key'] = opts.idempotencyKey;
         try {
           let res;
           try {
-            res = await doFetch(url, { method: verb, headers: h, credentials: 'include', body: sendBody ? JSON.stringify(body) : undefined });
+            const requestBody = !sendBody ? undefined : name === 'uploadMedia' ? body : JSON.stringify(body);
+            res = await doFetch(url, { method: verb, headers: h, credentials: 'include', body: requestBody });
           } catch (e) {
             throw new ApiError('NETWORK_ERROR', null, 0);
           }
@@ -587,6 +594,12 @@
         db.uploads[up.id] = up;
         return { uploadId: up.id, projectId: p.id, uploadUrl: up.url, expiresAt: up.expiresAt, project: projectView(p) };
       }),
+      uploadMedia: (uploadId) => op(() => {
+        const u = requireUser();
+        const up = db.uploads[uploadId];
+        if (!up || up.userId !== u.id) throw new ApiError('NOT_FOUND', null, 404);
+        return { ok: true };
+      }),
       completeUpload: (uploadId) => op(() => {
         const u = requireUser();
         const up = db.uploads[uploadId];
@@ -616,6 +629,8 @@
         return Object.values(db.projects).filter((p) => p.userId === u.id && p.status !== 'deleted').sort((a, b) => b.createdAt - a.createdAt).map(projectView);
       }),
       getProject: (id) => op(() => projectView(ownProject(requireUser(), id))),
+      getProjectPlayback: () => op(() => null),
+      renderClip: () => op(() => { throw new ApiError('RENDERER_UNAVAILABLE', null, 503); }),
       deleteProject: (id) => op(() => {
         const u = requireUser();
         const p = ownProject(u, id);

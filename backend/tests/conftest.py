@@ -27,7 +27,9 @@ def clock():
 
 @pytest.fixture
 def settings(tmp_path):
-    return Settings(database_url=f"sqlite+pysqlite:///{tmp_path / 'test.db'}")
+    return Settings(
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'test.db'}", media_dir=tmp_path / "media"
+    )
 
 
 @pytest.fixture
@@ -84,9 +86,16 @@ SOURCE = {
 
 
 def uploaded(client, headers, **overrides):
-    response = client.post("/v1/uploads", headers=headers, json={**SOURCE, **overrides})
+    metadata = {**SOURCE, **overrides, "sizeBytes": 12}
+    response = client.post("/v1/uploads", headers=headers, json=metadata)
     assert response.status_code == 200, response.text
     upload = response.json()
+    response = client.post(
+        f"/v1/uploads/{upload['uploadId']}/media",
+        headers={**headers, "Content-Type": "video/mp4"},
+        content=b"test-video!!",
+    )
+    assert response.status_code == 200, response.text
     response = client.post(f"/v1/uploads/{upload['uploadId']}/complete", headers=headers)
     assert response.status_code == 200, response.text
     return upload["projectId"]

@@ -62,6 +62,58 @@ def test_foreign_upload(client, headers):
     )
 
 
+def test_upload_is_stored_playable_and_supports_byte_ranges(client, headers, settings):
+    pid = uploaded(client, headers)
+    playback = client.post(f"/v1/projects/{pid}/playback", headers=headers)
+    assert playback.status_code == 200
+    link = playback.json()["url"]
+    path, query = link.split("?", 1)
+    params = dict(part.split("=", 1) for part in query.split("&"))
+    response = client.get(path, params=params, headers={"Range": "bytes=5-9"})
+    assert response.status_code == 206
+    assert response.content == b"video"
+    assert response.headers["content-range"] == "bytes 5-9/12"
+    assert list((settings.media_dir / "sources").glob("*.mp4"))
+    assert client.get(path, params={**params, "signature": "invalid"}).status_code == 401
+
+
+def test_rendered_mp4_is_saved_playable_listed_and_deleted(
+    client, headers, clock, settings, monkeypatch
+):
+    from app.routers import renders
+
+    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg):
+        assert source.is_file()
+        assert start >= 0 and duration > 0 and resolution == 1080
+        destination.write_bytes(b"rendered-short-mp4")
+
+    monkeypatch.setattr(renders, "render_short", fake_render)
+    pid = ready(client, headers, clock)
+    clip = client.get(f"/v1/projects/{pid}/clips", headers=headers).json()["clips"][0]
+    response = client.post(
+        f"/v1/projects/{pid}/render", headers=headers, json={"clipId": clip["id"]}
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["filename"].endswith("1080p.mp4")
+    assert list((settings.media_dir / "renders").glob("*.mp4"))
+    downloads = client.get(f"/v1/projects/{pid}/downloads", headers=headers).json()
+    mp4 = next(item for item in downloads if item["kind"] == "mp4")
+    assert mp4["filename"] == result["filename"]
+    assert mp4["downloadUrl"].endswith("&download=true")
+    path, query = result["url"].split("?", 1)
+    params = dict(part.split("=", 1) for part in query.split("&"))
+    streamed = client.get(path, params=params, headers={"Range": "bytes=0-7"})
+    assert streamed.status_code == 206 and streamed.content == b"rendered"
+    assert (
+        client.get(path, params={**params, "download": "true"})
+        .headers["content-disposition"]
+        .startswith("attachment;")
+    )
+    assert client.delete(f"/v1/projects/{pid}", headers=headers).status_code == 200
+    assert not list((settings.media_dir / "renders").glob("*.mp4"))
+
+
 @pytest.mark.parametrize("email", ["jon@example.com", "ops@example.com"])
 def test_every_project_operation_checks_ownership(client, headers, clock, email):
     pid = ready(client, headers, clock)
@@ -69,6 +121,8 @@ def test_every_project_operation_checks_ownership(client, headers, clock, email)
     for method, suffix, body in [
         ("GET", "", None),
         ("DELETE", "", None),
+        ("POST", "/playback", None),
+        ("POST", "/render", {"clipId": "foreign_clip"}),
         ("GET", "/status", None),
         ("GET", "/transcript", None),
         ("PATCH", "/transcript", {"segments": []}),
@@ -214,6 +268,7 @@ def test_quota_checked_before_upload_and_processing(client, headers, database, a
     with database.transaction() as session:
         user = session.scalar(select(UserRecord).where(UserRecord.email == "maya@example.com"))
         user.limitMinutes = 19
+        user.unlimitedUsage = False
     assert_error(
         client.post("/v1/uploads", headers=headers, json=SOURCE), 402, "MONTHLY_LIMIT_REACHED"
     )
@@ -224,8 +279,18 @@ def test_quota_checked_before_upload_and_processing(client, headers, database, a
     )
 
 
+def test_unlimited_creator_can_upload_past_configured_limit(client, headers, database):
+    with database.transaction() as session:
+        user = session.scalar(select(UserRecord).where(UserRecord.email == "maya@example.com"))
+        user.limitMinutes = 1
+        user.unlimitedUsage = True
+    assert client.post("/v1/uploads", headers=headers, json=SOURCE).status_code == 200
+
+
 def test_delete_revokes_access_and_purges_content(client, headers, clock, database, app):
     pid = ready(client, headers, clock)
+    source_file = next((app.state.settings.media_dir / "sources").glob("*.mp4"))
+    assert source_file.is_file()
     client.post(f"/v1/projects/{pid}/analysis-runs", headers=headers, json={"goal": "viral"})
     assert client.delete(f"/v1/projects/{pid}", headers=headers).json() == {
         "ok": True,
@@ -237,10 +302,13 @@ def test_delete_revokes_access_and_purges_content(client, headers, clock, databa
     assert not any(r["projectId"] == pid for r in rows(database, AnalysisRunRecord))
     assert any(e["projectId"] == pid for e in rows(database, LedgerRecord))
     assert not any(p["id"] == pid for p in client.get("/v1/projects", headers=headers).json())
+    assert not source_file.exists()
 
 
 def test_expiry_removes_content_but_keeps_history(client, headers, clock, database, app):
     pid = ready(client, headers, clock)
+    source_files = list((app.state.settings.media_dir / "sources").glob("*.mp4"))
+    assert source_files
     clock.advance(31 * 86400)
     headers = login(client)
     assert client.get(f"/v1/projects/{pid}", headers=headers).json()["status"] == "expired"
@@ -249,6 +317,7 @@ def test_expiry_removes_content_but_keeps_history(client, headers, clock, databa
             client.get(f"/v1/projects/{pid}{suffix}", headers=headers), 410, "ASSET_EXPIRED"
         )
     assert record(database, TranscriptRecord, pid) is None
+    assert not any(path.exists() for path in source_files)
     assert client.get("/v1/usage", headers=headers).json()["usedMinutes"] == 0
     clock.advance(60 * 86400)
     assert_error(client.get(f"/v1/projects/{pid}", headers=login(client)), 404, "NOT_FOUND")

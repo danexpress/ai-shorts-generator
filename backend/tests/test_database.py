@@ -55,13 +55,25 @@ def test_restart_preserves_users_tokens_edits_and_pending_uploads(settings, cloc
             headers=headers,
             json={"segments": [{"id": "seg_0", "text": "A persistent correction — café."}]},
         ).json()
-        pending = client.post("/v1/uploads", headers=headers, json=SOURCE).json()
+        pending = client.post(
+            "/v1/uploads", headers=headers, json={**SOURCE, "sizeBytes": 12}
+        ).json()
+        assert (
+            client.post(
+                f"/v1/uploads/{pending['uploadId']}/media",
+                headers={**headers, "Content-Type": "video/mp4"},
+                content=b"test-video!!",
+            ).status_code
+            == 200
+        )
         user_before = record(first.state.database, UserRecord, me["user"]["id"])
         counts = {
             m: len(rows(first.state.database, m)) for m in (UserRecord, ProjectRecord, LedgerRecord)
         }
         with first.state.database.transaction() as session:
-            session.get(UserRecord, me["user"]["id"]).limitMinutes = 75
+            user = session.get(UserRecord, me["user"]["id"])
+            user.limitMinutes = 75
+            user.unlimitedUsage = False
     # New engine and new app: no shared session or Python data store.
     second = create_app(settings=settings, clock=clock)
     with TestClient(second) as client:
