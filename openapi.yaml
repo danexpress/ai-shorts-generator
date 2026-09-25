@@ -1,0 +1,1469 @@
+# Frontend-derived contract with password/bearer authentication and SQLAlchemy persistence.
+openapi: 3.0.3
+info:
+  title: AI Shorts Generator — frontend API contract
+  version: 1.1.0
+  description: 'Contract for the 19 operations in frontend/services.js, with the requested password and bearer-token
+    authentication added for the in-memory FastAPI backend in backend/.
+
+
+    Requests and responses are JSON. GET operations have no body or query parameters. Timestamps are Unix milliseconds;
+    media positions and durations are seconds. Successful operations return 200.
+
+
+    Protected operations require Authorization: Bearer <access_token>, an active invited account, and project/upload
+    ownership. Foreign IDs return 404 just like missing IDs. Operators do not bypass ownership. Tokens expire and
+    logout revokes the presented token.
+
+
+    Authentication change from the original frontend contract: POST /v1/auth/google now requires email and password
+    and returns the Session fields plus access_token, token_type and expires_in. The legacy route name is retained
+    for compatibility; this is password authentication, not Google OAuth. Email-only mock login and cookie-only
+    authentication are no longer accepted. The frontend uses HTTP mode with a password form; its client retains
+    the bearer token in memory and attaches it to subsequent requests. Refreshing the page requires sign-in again.
+
+
+    The SQLAlchemy backend persists application data across restarts and seeds demo content only once. Media processing remains a development simulator: uploaded media is not stored or probed,
+    uploadUrl is a mock URI, processing advances when polled, and transcripts/clips use demo content. YouTube import
+    is disabled by default and only simulated when enabled. Downloads return data URIs. There are no real transcription,
+    LLM, rendering or object-storage integrations. Rendering, preview, settings and operator APIs are outside these
+    19 operations.'
+servers:
+- url: /
+  description: Same origin by default; createHttpApi can configure a baseUrl.
+security:
+- bearerAuth: []
+paths:
+  /v1/auth/google:
+    post:
+      operationId: signIn
+      summary: Sign in to the private beta
+      description: Verify email/password against a hashed password for an active invited account. Return session
+        information and a bearer token. No session cookie is issued; this is not Google OAuth.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '422':
+          $ref: '#/components/responses/Error422'
+  /v1/auth/logout:
+    post:
+      operationId: signOut
+      summary: End the application session
+      description: 'No request body. Send Authorization: Bearer <access_token> to revoke that token. Also succeeds
+        without a token or with an invalid/expired token.'
+      security: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/me:
+    get:
+      operationId: me
+      summary: Get current user, features, usage and active job
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/uploads:
+    post:
+      operationId: createUpload
+      summary: Create a signed upload session
+      description: Validate supplied metadata and create an uploading demo project. No bytes are received or media
+        independently probed in this metadata-only implementation. Returns a mock:// upload URL with a 15-minute expiry,
+        matching the frontend simulated upload flow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '402':
+          $ref: '#/components/responses/Error402'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '415':
+          $ref: '#/components/responses/Error415'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/uploads/{id}/complete:
+    post:
+      operationId: completeUpload
+      summary: Complete an upload
+      description: No request body. Mark the simulated source ready; project remains uploading until processProject
+        is called. This metadata-only backend does not verify stored media.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Upload session ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/youtube:
+    post:
+      operationId: createYoutubeProject
+      summary: Import a supported YouTube video
+      description: Requires youtubeImport feature flag and rights confirmation. Disabled by default. When enabled,
+        creates a source-ready demo project without downloading the URL; call processProject separately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/YoutubeRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '402':
+          $ref: '#/components/responses/Error402'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+  /v1/projects:
+    get:
+      operationId: listProjects
+      summary: List own projects
+      description: Bare array ordered newest first. Deleted projects are excluded. No pagination or filters are
+        sent by the client.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}:
+    get:
+      operationId: getProject
+      summary: Get an owned project
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '500':
+          $ref: '#/components/responses/Error500'
+    delete:
+      operationId: deleteProject
+      summary: Delete a project and queue asset removal
+      description: No request body. Revoke access immediately, cancel active work and queue removal of associated
+        assets.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deleted'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/process:
+    post:
+      operationId: processProject
+      summary: Start transcription and clip analysis
+      description: Requires completed upload/source readiness and uploading state. Enforce one compute-intensive
+        job per creator. Poll getStatus.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Guidance'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '402':
+          $ref: '#/components/responses/Error402'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/retry:
+    post:
+      operationId: retryProject
+      summary: Retry a failed project
+      description: UI sends {}. Reuses previous guidance and completed transcript if present; does not double-charge
+        usage.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetryRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '402':
+          $ref: '#/components/responses/Error402'
+  /v1/projects/{id}/cancel:
+    post:
+      operationId: cancelProject
+      summary: Cancel active source processing
+      description: No request body. Only process jobs are cancelable in this client contract; analysis regeneration
+        is not. Account only for processed source seconds.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/status:
+    get:
+      operationId: getStatus
+      summary: Poll processing status
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/transcript:
+    get:
+      operationId: getTranscript
+      summary: Read timestamped transcript
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transcript'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '500':
+          $ref: '#/components/responses/Error500'
+    patch:
+      operationId: saveTranscript
+      summary: Correct transcript text
+      description: Preserve source timing; use segment timing when word alignment is unsafe. Marks existing suggestions
+        stale without retranscription. Reject while a project job is active.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptEdit'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transcript'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/downloads:
+    get:
+      operationId: getProjectDownloads
+      summary: Get transcript download links
+      description: Bare array containing TXT and JSON downloads. Download JSON contains language, revision and segments;
+        it is not the full Transcript API response.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Download'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/clips:
+    get:
+      operationId: getClips
+      summary: Read current clip suggestions
+      description: Returns empty clips before an analysis run exists. Existing clips may remain available during
+        regeneration; stale indicates transcript edits invalidated them.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Clips'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/analysis-runs:
+    post:
+      operationId: createAnalysisRun
+      summary: Regenerate clip suggestions
+      description: Requires ready project and retained transcript. Reuses transcription and preprocessing without
+        additional source-minute usage. Failure may preserve ready state and existing clips, with regenError populated.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+          description: Opaque identifier.
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Guidance'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '410':
+          $ref: '#/components/responses/Error410'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/usage:
+    get:
+      operationId: getUsage
+      summary: Get monthly usage and ledger
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usage'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '500':
+          $ref: '#/components/responses/Error500'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Obtain access_token using email/password at POST /v1/auth/google. Tokens expire after expires_in
+        seconds and are revocable with logout.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Optional key for process, retry and analysis requests. Scoped to creator, project and operation.
+        Replays return the original accepted response without duplicate work or usage charges. Reusing a key with
+        different input returns INVALID_INPUT. Use a new key for a new action.
+  schemas:
+    Goal:
+      type: string
+      enum:
+      - educational
+      - entertaining
+      - viral
+    ProjectState:
+      type: string
+      enum:
+      - draft
+      - uploading
+      - transcribing
+      - analyzing
+      - ready
+      - failed
+      - canceled
+      - expired
+      - deleted
+    Guidance:
+      type: object
+      required:
+      - goal
+      properties:
+        goal:
+          $ref: '#/components/schemas/Goal'
+        instruction:
+          type: string
+          maxLength: 200
+          default: ''
+        avoid:
+          type: array
+          items:
+            type: string
+            maxLength: 40
+          maxItems: 10
+          default: []
+    SignInRequest:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 1
+          maxLength: 1024
+      description: Password login for seeded, invited development accounts. The existing route name is retained;
+        no Google identity exchange is performed.
+    User:
+      type: object
+      required:
+      - id
+      - email
+      - displayName
+      - role
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        role:
+          type: string
+          enum:
+          - creator
+          - operator
+    UsageSummary:
+      type: object
+      required:
+      - usedMinutes
+      - limitMinutes
+      - remainingMinutes
+      properties:
+        usedMinutes:
+          type: integer
+          minimum: 0
+        limitMinutes:
+          type: integer
+          minimum: 0
+        remainingMinutes:
+          type: integer
+          minimum: 0
+      description: Calendar-month allowance. usedMinutes is ceil(total processedSeconds + adjustmentSeconds divided
+        by 60). Default limit is 60 minutes.
+    LedgerEntry:
+      type: object
+      required:
+      - id
+      - userId
+      - projectId
+      - jobId
+      - usageType
+      - processedSeconds
+      - adjustmentSeconds
+      - createdAt
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        userId:
+          type: string
+          description: Opaque identifier.
+        projectId:
+          type: string
+          description: Opaque identifier.
+        jobId:
+          type: string
+          description: Opaque identifier.
+          nullable: true
+        usageType:
+          type: string
+          description: Currently transcription.
+        processedSeconds:
+          type: integer
+          minimum: 0
+        adjustmentSeconds:
+          type: integer
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds, not an ISO date string.
+    Usage:
+      type: object
+      required:
+      - usedMinutes
+      - limitMinutes
+      - remainingMinutes
+      - entries
+      properties:
+        usedMinutes:
+          type: integer
+          minimum: 0
+        limitMinutes:
+          type: integer
+          minimum: 0
+        remainingMinutes:
+          type: integer
+          minimum: 0
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerEntry'
+      description: Summary plus append-only ledger entries for the authenticated creator in the current UTC calendar
+        month. Retries must not double-count processing.
+    ActiveJob:
+      type: object
+      required:
+      - id
+      - projectId
+      - type
+      - stage
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        projectId:
+          type: string
+          description: Opaque identifier.
+        type:
+          type: string
+          enum:
+          - process
+          - analysis
+        stage:
+          type: string
+          enum:
+          - transcribing
+          - analyzing
+    Session:
+      type: object
+      required:
+      - user
+      - features
+      - usage
+      - activeJob
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        features:
+          type: object
+          required:
+          - youtubeImport
+          properties:
+            youtubeImport:
+              type: boolean
+        usage:
+          $ref: '#/components/schemas/UsageSummary'
+        activeJob:
+          type: object
+          required:
+          - id
+          - projectId
+          - type
+          - stage
+          properties:
+            id:
+              type: string
+              description: Opaque identifier.
+            projectId:
+              type: string
+              description: Opaque identifier.
+            type:
+              type: string
+              enum:
+              - process
+              - analysis
+            stage:
+              type: string
+              enum:
+              - transcribing
+              - analyzing
+          nullable: true
+    Project:
+      type: object
+      required:
+      - id
+      - name
+      - sourceType
+      - status
+      - durationSec
+      - width
+      - height
+      - fps
+      - sizeBytes
+      - language
+      - goal
+      - instruction
+      - avoid
+      - createdAt
+      - suggestionCount
+      - renderCount
+      - sourceExpiresAt
+      - sourceExpired
+      - analysisExpiresAt
+      - clipsStale
+      - failureCode
+      - transcriptRevision
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        name:
+          type: string
+        sourceType:
+          type: string
+          enum:
+          - upload
+          - youtube_url
+        status:
+          $ref: '#/components/schemas/ProjectState'
+        durationSec:
+          type: number
+        width:
+          type: integer
+        height:
+          type: integer
+        fps:
+          type: number
+        sizeBytes:
+          type: integer
+          format: int64
+        language:
+          type: string
+          nullable: true
+        goal:
+          type: string
+          enum:
+          - educational
+          - entertaining
+          - viral
+          nullable: true
+        instruction:
+          type: string
+        avoid:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds, not an ISO date string.
+        suggestionCount:
+          type: integer
+          minimum: 0
+        renderCount:
+          type: integer
+          minimum: 0
+        sourceExpiresAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds, not an ISO date string.
+          nullable: true
+        sourceExpired:
+          type: boolean
+        analysisExpiresAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds, not an ISO date string.
+          nullable: true
+        clipsStale:
+          type: boolean
+        failureCode:
+          type: string
+          nullable: true
+        transcriptRevision:
+          type: integer
+          minimum: 1
+          nullable: true
+    UploadRequest:
+      type: object
+      required:
+      - fileName
+      - mimeType
+      - sizeBytes
+      - durationSec
+      - width
+      - height
+      - fps
+      - hasVideo
+      - hasAudio
+      properties:
+        fileName:
+          type: string
+          description: MP4, MOV or WebM filename.
+        title:
+          type: string
+        mimeType:
+          type: string
+          description: Video MIME type; the browser can supply an empty string.
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 4294967296
+        durationSec:
+          type: number
+          minimum: 30
+          maximum: 3600
+        width:
+          type: integer
+          minimum: 1
+          maximum: 7680
+        height:
+          type: integer
+          minimum: 1
+          maximum: 7680
+        fps:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          maximum: 120
+        hasVideo:
+          type: boolean
+          enum:
+          - true
+        hasAudio:
+          type: boolean
+      description: Untrusted browser-supplied metadata, not video bytes. The demo backend validates these fields,
+        including both stream-presence flags. Real media probing requires a future storage/worker integration.
+    UploadSession:
+      type: object
+      required:
+      - uploadId
+      - projectId
+      - uploadUrl
+      - expiresAt
+      - project
+      properties:
+        uploadId:
+          type: string
+          description: Opaque identifier.
+        projectId:
+          type: string
+          description: Opaque identifier.
+        uploadUrl:
+          type: string
+          format: uri
+          description: mock:// URI in the demo backend; not an actual signed upload target.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds, not an ISO date string.
+        project:
+          $ref: '#/components/schemas/Project'
+    YoutubeRequest:
+      type: object
+      required:
+      - url
+      - rightsConfirmed
+      properties:
+        url:
+          type: string
+          format: uri
+          description: HTTPS youtube.com, www.youtube.com or m.youtube.com /watch?v=ID, or youtu.be/ID. Current
+            mock accepts IDs matching [\w-]{6,15}.
+        rightsConfirmed:
+          type: boolean
+          enum:
+          - true
+    Status:
+      type: object
+      required:
+      - projectId
+      - status
+      - jobId
+      - jobType
+      - stage
+      - progress
+      - failureCode
+      - regenError
+      - canCancel
+      - canRetry
+      properties:
+        projectId:
+          type: string
+          description: Opaque identifier.
+        status:
+          $ref: '#/components/schemas/ProjectState'
+        jobId:
+          type: string
+          description: Opaque identifier.
+          nullable: true
+        jobType:
+          type: string
+          enum:
+          - process
+          - analysis
+          nullable: true
+        stage:
+          type: string
+          enum:
+          - transcribing
+          - analyzing
+          nullable: true
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        failureCode:
+          type: string
+          nullable: true
+        regenError:
+          type: string
+          nullable: true
+        canCancel:
+          type: boolean
+        canRetry:
+          type: boolean
+    Word:
+      type: object
+      required:
+      - w
+      - s
+      - e
+      properties:
+        w:
+          type: string
+        s:
+          type: number
+          minimum: 0
+        e:
+          type: number
+          minimum: 0
+      description: Text and source-relative start/end times in seconds.
+    Segment:
+      type: object
+      required:
+      - id
+      - start
+      - end
+      - text
+      - timing
+      - words
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
+        text:
+          type: string
+        timing:
+          type: string
+          enum:
+          - word
+          - segment
+        words:
+          type: array
+          items:
+            $ref: '#/components/schemas/Word'
+      description: When timing is segment, word positions are not reliable word-level alignment; use segment-level
+        captions.
+    Transcript:
+      type: object
+      required:
+      - projectId
+      - language
+      - revision
+      - userCorrected
+      - segments
+      properties:
+        projectId:
+          type: string
+          description: Opaque identifier.
+        language:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        userCorrected:
+          type: boolean
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Segment'
+    TranscriptEdit:
+      type: object
+      required:
+      - segments
+      properties:
+        segments:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - text
+            properties:
+              id:
+                type: string
+                description: Opaque identifier.
+              text:
+                type: string
+                minLength: 1
+                maxLength: 2000
+                description: Nonblank corrected text. No timing edits.
+      description: Partial list of existing segments. Empty list is a no-op. Changed text increments the transcript
+        revision and marks dependent suggestions stale.
+    Download:
+      type: object
+      required:
+      - kind
+      - filename
+      - url
+      - bytes
+      properties:
+        kind:
+          type: string
+          enum:
+          - txt
+          - json
+        filename:
+          type: string
+        url:
+          type: string
+          format: uri
+          description: Downloadable URL; mock returns a data URI. Production should use short-lived signed URLs
+            or authenticated downloads.
+        bytes:
+          type: integer
+          minimum: 0
+    Scores:
+      type: object
+      required:
+      - hook
+      - value
+      - standalone
+      - visual
+      properties:
+        hook:
+          type: number
+          minimum: 0
+          maximum: 100
+        value:
+          type: number
+          minimum: 0
+          maximum: 100
+        standalone:
+          type: number
+          minimum: 0
+          maximum: 100
+        visual:
+          type: number
+          minimum: 0
+          maximum: 100
+    Clip:
+      type: object
+      required:
+      - id
+      - projectId
+      - runId
+      - rank
+      - start
+      - end
+      - duration
+      - hook
+      - scores
+      - combined
+      - reason
+      - tags
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        projectId:
+          type: string
+          description: Opaque identifier.
+        runId:
+          type: string
+          description: Opaque identifier.
+        rank:
+          type: integer
+          minimum: 1
+        start:
+          type: number
+          minimum: 0
+        end:
+          type: number
+          minimum: 0
+        duration:
+          type: number
+          minimum: 15
+          maximum: 90
+        hook:
+          type: string
+          minLength: 1
+          maxLength: 80
+        scores:
+          $ref: '#/components/schemas/Scores'
+        combined:
+          type: integer
+          minimum: 0
+          maximum: 100
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+        tags:
+          type: array
+          items:
+            type: string
+      description: One continuous source interval, in seconds. Combined score uses configurable hook/value/standalone/visual
+        weights, initially 30/30/25/15 percent.
+    Clips:
+      type: object
+      required:
+      - runId
+      - goal
+      - stale
+      - clips
+      properties:
+        runId:
+          type: string
+          description: Opaque identifier.
+          nullable: true
+        goal:
+          type: string
+          enum:
+          - educational
+          - entertaining
+          - viral
+          nullable: true
+        instruction:
+          type: string
+        avoid:
+          type: array
+          items:
+            type: string
+        stale:
+          type: boolean
+        promptVersion:
+          type: string
+        modelName:
+          type: string
+        clips:
+          type: array
+          items:
+            $ref: '#/components/schemas/Clip'
+      description: 'Before analysis: runId and goal are null, stale is false, clips is empty, and optional analysis
+        fields are absent. Successful runs return all fields. Prefer fewer good clips over padding the result.'
+    Ok:
+      type: object
+      required:
+      - ok
+      properties:
+        ok:
+          type: boolean
+          enum:
+          - true
+    Deleted:
+      type: object
+      required:
+      - ok
+      - deletionQueued
+      properties:
+        ok:
+          type: boolean
+          enum:
+          - true
+        deletionQueued:
+          type: boolean
+          enum:
+          - true
+    RetryRequest:
+      type: object
+      properties: {}
+      description: Optional empty object. Retry reuses the previous job guidance; no new settings are accepted.
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          properties:
+            code:
+              type: string
+              enum:
+              - UNSUPPORTED_MEDIA
+              - SOURCE_TOO_LONG
+              - SOURCE_TOO_SHORT
+              - SOURCE_TOO_LARGE
+              - MEDIA_PROBE_FAILED
+              - TRANSCRIPTION_FAILED
+              - ANALYSIS_FAILED
+              - IMPORT_UNAVAILABLE
+              - UNSUPPORTED_URL
+              - RIGHTS_NOT_CONFIRMED
+              - MONTHLY_LIMIT_REACHED
+              - ACTIVE_JOB_EXISTS
+              - ASSET_EXPIRED
+              - NOT_FOUND
+              - NOT_INVITED
+              - ACCOUNT_DISABLED
+              - UNAUTHENTICATED
+              - INVALID_INPUT
+              - INVALID_STATE
+              - SERVER_ERROR
+            message:
+              type: string
+      description: Stable error envelope read by createHttpApi. message is optional because the client has fallback
+        copy. NETWORK_ERROR is generated locally on fetch failure, not returned by the server.
+    LoginResponse:
+      allOf:
+      - $ref: '#/components/schemas/Session'
+      - type: object
+        required:
+        - access_token
+        - token_type
+        - expires_in
+        properties:
+          access_token:
+            type: string
+            description: Opaque bearer token. Treat as a secret.
+          token_type:
+            type: string
+            enum:
+            - bearer
+          expires_in:
+            type: integer
+            minimum: 1
+            description: Token lifetime in seconds.
+  responses:
+    Error401:
+      description: UNAUTHENTICATED — session missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error403:
+      description: ACCOUNT_DISABLED — account is disabled; sign-in can also return NOT_INVITED.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error404:
+      description: NOT_FOUND — resource missing, deleted, or owned by another creator.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error402:
+      description: MONTHLY_LIMIT_REACHED — processing would exceed the allowance.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error409:
+      description: INVALID_STATE or ACTIVE_JOB_EXISTS — action unavailable, expired upload, or conflicting compute-intensive
+        job.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error410:
+      description: ASSET_EXPIRED — transcript/analysis retention elapsed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error413:
+      description: SOURCE_TOO_LARGE — source exceeds 4 GiB.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error415:
+      description: UNSUPPORTED_MEDIA — unsupported container/stream, dimensions, or frame rate.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error422:
+      description: INVALID_INPUT, SOURCE_TOO_LONG, SOURCE_TOO_SHORT, MEDIA_PROBE_FAILED, UNSUPPORTED_URL or RIGHTS_NOT_CONFIRMED
+        — request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error503:
+      description: IMPORT_UNAVAILABLE — YouTube import feature disabled or unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error500:
+      description: SERVER_ERROR — unexpected backend failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

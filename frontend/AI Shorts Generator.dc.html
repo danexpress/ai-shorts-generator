@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./config.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="industry.css">
+<style>body{margin:0} a{color:var(--color-accent-700)} a:hover{color:var(--color-accent-900)} textarea.input{min-height:0}</style>
+<script src="services.js"></script>
+<script src="tests.js"></script>
+</helmet>
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+
+<sc-if value="{{ isBoot }}" hint-placeholder-val="{{ false }}">
+  <div style="min-height:100vh;display:grid;place-items:center;font-family:var(--font-heading);font-size:18px;color:var(--color-neutral-700)">Connecting to backend…</div>
+</sc-if>
+
+<sc-if value="{{ isLogin }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Login" style="min-height:100vh;display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+    <div style="display:flex;flex-direction:column;justify-content:center;padding:56px clamp(24px,6vw,88px);gap:28px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="blueprint" style="width:22px;height:32px;display:grid;place-items:center;border-color:var(--color-accent)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><span style="width:8px;height:8px;background:var(--color-accent)"></span></span>
+        <span style="font-family:var(--font-heading);font-weight:600;font-size:20px">AI Shorts Generator</span>
+      </div>
+      <h1 style="font-size:56px;margin:0;max-width:520px;text-wrap:pretty">Turn a long interview into a Short you’d actually post.</h1>
+      <p style="font-size:17px;max-width:460px;margin:0;color:var(--color-neutral-800);text-wrap:pretty">Upload up to 60 minutes. Get a handful of strong moments, the reasons they were picked, and a vertical Short without opening an editor.</p>
+      <div style="display:flex;flex-direction:column;gap:12px;max-width:380px">
+        <form onSubmit="{{ signIn }}" style="display:flex;flex-direction:column;gap:12px">
+          <div class="field"><label for="login-email">Email</label><input id="login-email" class="input" type="email" autocomplete="username" required maxlength="254" value="{{ loginEmail }}" onChange="{{ onLoginEmail }}" disabled="{{ loginBusy }}"></div>
+          <div class="field"><label for="login-password">Password</label><input id="login-password" class="input" type="password" autocomplete="current-password" required maxlength="1024" value="{{ loginPassword }}" onChange="{{ onLoginPassword }}" disabled="{{ loginBusy }}"></div>
+          <button type="submit" class="btn btn-primary blueprint" style="padding:12px 18px;font-size:16px" disabled="{{ loginBusy }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>{{ loginLabel }}</button>
+        </form>
+        <sc-if value="{{ loginError }}" hint-placeholder-val="{{ false }}">
+          <div role="alert" style="display:flex;gap:10px;padding:12px 14px;border:1px solid var(--color-text);font-size:14px"><span style="font-family:var(--font-heading);font-weight:600">Sign-in failed.</span><span>{{ loginError }}</span></div>
+        </sc-if>
+        <p style="font-size:13px;margin:0;color:var(--color-neutral-700)">Private beta — sign in with your invited account. Refreshing the page signs you out.</p>
+      </div>
+    </div>
+    <div style="border-left:1px solid var(--color-divider);display:grid;place-items:center;padding:48px;background-image:linear-gradient(var(--color-divider) 1px,transparent 1px),linear-gradient(90deg,var(--color-divider) 1px,transparent 1px);background-size:48px 48px">
+      <div style="display:flex;gap:28px;align-items:center">
+        <div class="blueprint" style="width:260px;aspect-ratio:16/9;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-text) 7%,transparent) 7px 8px);display:grid;place-items:center;font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>source · 16:9 · 32:14</div>
+        <span style="font-family:var(--font-heading);font-size:28px;color:var(--color-accent)">→</span>
+        <div class="blueprint" style="width:130px;aspect-ratio:9/16;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-accent) 18%,transparent) 7px 8px);display:flex;flex-direction:column;justify-content:space-between;padding:14px 10px;border-color:var(--color-accent)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <span style="font-family:var(--font-heading);font-weight:600;font-size:14px;line-height:1.1;background:var(--color-bg);padding:4px 6px">Most founders hire backwards</span>
+          <span style="font-family:ui-monospace,monospace;font-size:10px;text-align:center;color:var(--color-accent-800)">short · 9:16 · 0:46</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isApp }}" hint-placeholder-val="{{ false }}">
+  <header style="display:flex;align-items:center;gap:16px;padding:10px 28px;border-bottom:1px solid var(--color-divider);flex-wrap:wrap">
+    <button onClick="{{ goDashboard }}" style="display:flex;align-items:center;gap:10px;background:none;border:0;padding:4px 0;cursor:pointer;color:inherit">
+      <span class="blueprint" style="width:18px;height:26px;display:grid;place-items:center;border-color:var(--color-accent)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><span style="width:6px;height:6px;background:var(--color-accent)"></span></span>
+      <span style="font-family:var(--font-heading);font-weight:600;font-size:18px">AI Shorts Generator</span>
+    </button>
+    <nav style="display:flex;gap:4px;margin-right:auto">
+      <button class="btn btn-ghost" style="color:var(--color-text)" onClick="{{ goDashboard }}">Projects</button>
+      <button class="btn btn-ghost" style="color:var(--color-text)" onClick="{{ goNew }}">New project</button>
+    </nav>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+      <span>{{ usageUsed }} / {{ usageLimit }} min</span>
+      <span style="width:72px;height:4px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span>
+    </div>
+    <span class="tag tag-outline">Demo data</span>
+    <button class="btn btn-secondary" onClick="{{ toggleTests }}">Tests</button>
+    <span style="font-size:13px;color:var(--color-neutral-800)">{{ userName }}</span>
+    <button class="btn btn-ghost" onClick="{{ signOut }}">Sign out</button>
+  </header>
+
+  <main style="max-width:1200px;margin:0 auto;padding:36px 28px 96px">
+
+  <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Dashboard" style="display:flex;flex-direction:column;gap:28px">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div><div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Private beta · {{ monthLabel }}</div><h1 style="margin:4px 0 0">Projects</h1></div>
+        <button class="btn btn-primary blueprint" style="padding:10px 20px;font-size:15px" onClick="{{ goNew }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>New project</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px">
+        <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:10px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Processing minutes</div>
+          <div style="font-family:var(--font-heading);font-size:34px;font-weight:600;line-height:1">{{ usageUsed }} <span style="font-size:20px;color:var(--color-neutral-700)">of {{ usageLimit }} used this month</span></div>
+          <span style="height:6px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ usagePct }}%;background:var(--color-accent)"></span></span>
+          <div style="font-size:13px;color:var(--color-neutral-800)">{{ usageRemaining }} minutes left · resets {{ resetLabel }}</div>
+        </div>
+        <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:10px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Active job</div>
+          <sc-if value="{{ hasActiveJob }}" hint-placeholder-val="{{ false }}">
+            <div style="font-family:var(--font-heading);font-size:22px;font-weight:600;line-height:1.15">{{ activeJobName }}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span style="font-size:13px">{{ activeJobStage }}</span><button class="btn btn-secondary" onClick="{{ openActive }}">Open</button></div>
+          </sc-if>
+          <sc-if value="{{ noActiveJob }}" hint-placeholder-val="{{ true }}">
+            <div style="font-family:var(--font-heading);font-size:22px;font-weight:600;line-height:1.15">Nothing processing</div>
+            <div style="font-size:13px;color:var(--color-neutral-800)">One video processes at a time. Editing and downloads stay available.</div>
+          </sc-if>
+        </div>
+      </div>
+      <div class="blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr) 60px;gap:16px;padding:10px 18px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)"><span>Project</span><span>State</span><span>Output</span><span>Retention</span><span></span></div>
+        <sc-for list="{{ projects }}" as="p" hint-placeholder-count="3">
+          <button onClick="{{ p.open }}" style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr) 60px;gap:16px;align-items:center;width:100%;padding:14px 18px;background:none;border:0;border-top:1px solid var(--color-divider);text-align:left;cursor:pointer;color:inherit;font:inherit" style-hover="background:color-mix(in srgb,var(--color-accent) 7%,transparent)">
+            <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-family:var(--font-heading);font-weight:600;font-size:18px;line-height:1.2">{{ p.name }}</span><span style="font-size:12px;color:var(--color-neutral-700)">{{ p.meta }}</span></span>
+            <span><span class="{{ p.tagClass }}">{{ p.statusLabel }}</span></span>
+            <span style="font-size:13px">{{ p.output }}</span>
+            <span style="font-size:13px;color:var(--color-neutral-800)">{{ p.expiry }}</span>
+            <span style="font-family:var(--font-heading);font-weight:600;color:var(--color-accent-700);text-align:right">Open →</span>
+          </button>
+        </sc-for>
+        <sc-if value="{{ noProjects }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:40px 18px;border-top:1px solid var(--color-divider);text-align:center;color:var(--color-neutral-800)">No projects yet. Start with a long-form video.</div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isNew }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="New project" style="display:flex;flex-direction:column;gap:28px">
+      <div><div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">New project</div><h1 style="margin:4px 0 0">What are we cutting today?</h1></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:28px;align-items:start">
+        <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:18px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <h3 style="margin:0">Source</h3>
+            <div class="seg">
+              <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="2">
+                <button class="seg-opt" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}" style="border:0;font:inherit;font-size:13px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <p style="margin:0;font-size:13px;color:var(--color-neutral-800)">This demo uses sample transcripts and clips. Selected videos are not uploaded or analyzed.</p>
+          <sc-if value="{{ isUploadTab }}" hint-placeholder-val="{{ true }}">
+            <sc-if value="{{ noSource }}" hint-placeholder-val="{{ true }}">
+              <label style="position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:44px 20px;border:1px dashed var(--color-neutral-500);cursor:pointer;text-align:center" style-hover="border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 5%,transparent)">
+                <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange="{{ onFile }}" style="position:absolute;opacity:0;width:1px;height:1px">
+                <span style="font-family:var(--font-heading);font-weight:600;font-size:20px">Choose a video file</span>
+                <span style="font-size:13px;color:var(--color-neutral-700)">MP4, MOV or WebM · 30 s to 60 min · up to 4 GB</span>
+              </label>
+              <button class="btn btn-ghost" style="align-self:flex-start" onClick="{{ useSample }}">Or use the sample: The Operator Hour, Ep. 42 (32:14)</button>
+            </sc-if>
+            <sc-if value="{{ probing }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:14px;color:var(--color-neutral-800)">Reading video metadata…</div>
+            </sc-if>
+            <sc-if value="{{ hasSource }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                  <div style="min-width:0"><div style="font-family:var(--font-heading);font-weight:600;font-size:20px;line-height:1.2;overflow-wrap:anywhere">{{ srcName }}</div><div style="font-size:12px;color:var(--color-neutral-700)">{{ srcFile }}</div></div>
+                  <button class="btn btn-secondary" onClick="{{ clearSource }}">Replace</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--color-divider);border-left:1px solid var(--color-divider)">
+                  <sc-for list="{{ srcSpecs }}" as="s" hint-placeholder-count="4">
+                    <div style="padding:10px 12px;border-right:1px solid var(--color-divider);border-bottom:1px solid var(--color-divider)"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">{{ s.label }}</div><div style="font-family:var(--font-heading);font-weight:600;font-size:19px">{{ s.value }}</div></div>
+                  </sc-for>
+                </div>
+                <div style="font-size:13px;color:var(--color-neutral-800)">{{ allowanceText }}</div>
+              </div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ isUrlTab }}" hint-placeholder-val="{{ false }}">
+            <div class="field"><label for="yt-url">Public YouTube URL</label><input id="yt-url" class="input" placeholder="https://www.youtube.com/watch?v=…" value="{{ npUrl }}" onChange="{{ onUrl }}"></div>
+            <label class="radio" style="align-items:flex-start;font-size:13px"><input type="checkbox" checked="{{ npRights }}" onChange="{{ onRights }}"><span class="dot" style="border-radius:0;margin-top:2px"></span><span>I have the rights or permission to reuse this video. A public link doesn’t grant reuse rights on its own.</span></label>
+            <sc-if value="{{ urlImportOff }}" hint-placeholder-val="{{ true }}">
+              <div style="font-size:13px;color:var(--color-neutral-800)">URL import is an experimental beta feature and is currently off. Upload the file instead.</div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ npError }}" hint-placeholder-val="{{ false }}">
+            <div role="alert" style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--color-text);font-size:14px"><span style="flex:none;width:20px;height:20px;display:grid;place-items:center;background:var(--color-text);color:var(--color-bg);font-weight:700;font-size:13px">!</span><span style="display:flex;flex-direction:column;gap:2px"><span>{{ npError }}</span><span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700)">{{ npErrorCode }}</span></span></div>
+          </sc-if>
+        </div>
+
+        <div class="blueprint" style="padding:20px;display:flex;flex-direction:column;gap:18px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <h3 style="margin:0">What should we look for?</h3>
+          <div role="radiogroup" aria-label="Analysis goal" style="display:flex;flex-direction:column;border:1px solid var(--color-divider)">
+            <sc-for list="{{ goals }}" as="g" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{ g.checked }}" onClick="{{ g.pick }}" style="display:flex;gap:12px;align-items:flex-start;padding:12px 14px;background:{{ g.bg }};border:0;border-bottom:1px solid var(--color-divider);text-align:left;cursor:pointer;color:inherit;font:inherit">
+                <span style="flex:none;width:16px;height:16px;margin-top:3px;border-radius:50%;border:1.5px solid var(--color-accent);box-shadow:inset 0 0 0 {{ g.ring }}px var(--color-accent)"></span>
+                <span style="display:flex;flex-direction:column"><span style="font-family:var(--font-heading);font-weight:600;font-size:18px">{{ g.label }}</span><span style="font-size:13px;color:var(--color-neutral-800)">{{ g.desc }}</span></span>
+              </button>
+            </sc-for>
+          </div>
+          <div class="field"><label for="np-instr">Custom instruction (optional) · {{ instrCount }}/200</label><textarea id="np-instr" class="input" rows="2" maxlength="200" placeholder="Find clips about hiring and pricing" value="{{ npInstruction }}" onChange="{{ onInstruction }}"></textarea></div>
+          <div class="field"><label for="np-avoid">Topics to avoid (optional, comma-separated)</label><input id="np-avoid" class="input" placeholder="fundraising, competitors" value="{{ npAvoid }}" onChange="{{ onAvoid }}"></div>
+          <button class="btn btn-primary blueprint" style="padding:12px;font-size:16px" disabled="{{ cannotStart }}" onClick="{{ start }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>{{ startLabel }}</button>
+          <p style="font-size:12px;margin:0;color:var(--color-neutral-700)">You’re responsible for having the rights to reuse this content. We don’t make legal determinations about ownership or fair use.</p>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isProcessing }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Processing" style="display:flex;flex-direction:column;gap:28px;max-width:880px">
+      <div><div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Processing</div><h1 style="margin:4px 0 0">{{ projName }}</h1></div>
+      <div class="blueprint" style="display:flex;flex-direction:column"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <ol style="list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))">
+          <sc-for list="{{ stages }}" as="s" hint-placeholder-count="4">
+            <li style="padding:16px;border-right:1px solid var(--color-divider);border-top:3px solid {{ s.bar }};display:flex;flex-direction:column;gap:4px;opacity:{{ s.opacity }}">
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700)">{{ s.n }}</span>
+              <span style="font-family:var(--font-heading);font-weight:600;font-size:20px">{{ s.label }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-800)">{{ s.stateText }}</span>
+            </li>
+          </sc-for>
+        </ol>
+        <div style="padding:20px;border-top:1px solid var(--color-divider);display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:14px"><span>{{ statusText }}</span><span style="font-family:ui-monospace,monospace">{{ progressPct }}%</span></div>
+          <span role="progressbar" aria-valuenow="{{ progressPct }}" aria-valuemin="0" aria-valuemax="100" style="height:6px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ progressPct }}%;background:var(--color-accent);transition:width .5s"></span></span>
+          <sc-if value="{{ hasProcError }}" hint-placeholder-val="{{ false }}">
+            <div role="alert" style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--color-text);font-size:14px"><span style="flex:none;width:20px;height:20px;display:grid;place-items:center;background:var(--color-text);color:var(--color-bg);font-weight:700;font-size:13px">!</span><span style="display:flex;flex-direction:column;gap:2px"><span>{{ procErrorText }}</span><span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700)">{{ procErrorCode }}</span></span></div>
+          </sc-if>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn btn-ghost" onClick="{{ goDashboard }}">Back to projects</button>
+            <sc-if value="{{ canCancel }}" hint-placeholder-val="{{ false }}"><button class="btn btn-secondary" onClick="{{ cancel }}">Cancel processing</button></sc-if>
+            <sc-if value="{{ canRetry }}" hint-placeholder-val="{{ false }}"><button class="btn btn-primary" onClick="{{ retry }}">Retry from failed step</button></sc-if>
+            <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+              <button class="btn btn-secondary" onClick="{{ goTranscript }}">Review transcript</button>
+              <button class="btn btn-primary" onClick="{{ goSuggestions }}">See suggestions</button>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:13px;margin:0;color:var(--color-neutral-700)">You can leave this page — processing continues and the project shows its status on the dashboard.</p>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isTranscript }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Transcript" style="display:flex;flex-direction:column;gap:24px">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div><div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Transcript · English (auto-detected) · revision {{ revision }}</div><h1 style="margin:4px 0 0">{{ projName }}</h1></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary" onClick="{{ downloadTxt }}">Download TXT</button>
+          <button class="btn btn-secondary" onClick="{{ downloadJson }}">Download JSON</button>
+          <button class="btn btn-secondary" disabled="{{ notDirty }}" onClick="{{ saveTranscript }}">{{ saveLabel }}</button>
+          <button class="btn btn-primary" onClick="{{ goSuggestions }}">Continue to suggestions</button>
+        </div>
+      </div>
+      <p style="margin:0;font-size:14px;color:var(--color-neutral-800)">Correct words and punctuation. Timing stays locked to the original audio; saving re-flags suggestions for regeneration.</p>
+      <div class="blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <sc-for list="{{ segments }}" as="s" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:96px minmax(0,1fr);gap:16px;padding:12px 18px;border-bottom:1px solid var(--color-divider);align-items:start">
+            <div style="display:flex;flex-direction:column;gap:6px;padding-top:7px"><span style="font-family:ui-monospace,monospace;font-size:12px">{{ s.time }}</span><sc-if value="{{ s.edited }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent" style="align-self:flex-start">Edited</span></sc-if><sc-if value="{{ s.segmentTiming }}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;color:var(--color-neutral-700)">Segment timing</span></sc-if></div>
+            <textarea class="input" rows="2" aria-label="{{ s.label }}" value="{{ s.text }}" onChange="{{ s.onChange }}" style="background:transparent;border-color:transparent;resize:vertical;line-height:1.5" style-hover="border-color:var(--color-divider)"></textarea>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isSuggestions }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Suggestions" style="display:flex;flex-direction:column;gap:24px">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div><div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">{{ clipsKicker }}</div><h1 style="margin:4px 0 0">{{ projName }}</h1></div>
+        <button class="btn btn-secondary" onClick="{{ goTranscript }}">Transcript</button>
+      </div>
+      <div class="blueprint" style="padding:16px 18px;display:grid;grid-template-columns:auto minmax(200px,1.4fr) minmax(160px,1fr) auto;gap:14px;align-items:end"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div class="field"><label>Goal</label><div class="seg">
+          <sc-for list="{{ regenGoals }}" as="g" hint-placeholder-count="3">
+            <button class="seg-opt" aria-pressed="{{ g.pressed }}" onClick="{{ g.pick }}" style="border:0;font:inherit;font-size:13px;background:{{ g.bg }};color:{{ g.fg }}">{{ g.label }}</button>
+          </sc-for>
+        </div></div>
+        <div class="field"><label for="rg-instr">Guidance</label><input id="rg-instr" class="input" maxlength="200" placeholder="Find clips about pricing" value="{{ regenInstruction }}" onChange="{{ onRegenInstruction }}"></div>
+        <div class="field"><label for="rg-avoid">Avoid</label><input id="rg-avoid" class="input" placeholder="fundraising" value="{{ regenAvoid }}" onChange="{{ onRegenAvoid }}"></div>
+        <button class="btn btn-primary" style="min-height:36px" disabled="{{ regenerating }}" onClick="{{ regenerate }}">Regenerate</button>
+      </div>
+      <sc-if value="{{ regenerating }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;justify-content:space-between;font-size:14px"><span>Re-ranking moments from the existing transcript — no extra minutes used</span><span style="font-family:ui-monospace,monospace">{{ regenPct }}%</span></div><span style="height:4px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ regenPct }}%;background:var(--color-accent);transition:width .5s"></span></span></div>
+      </sc-if>
+      <sc-if value="{{ clipsStale }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--color-accent);background:var(--color-accent-100);font-size:14px;color:var(--color-accent-900)"><span>The transcript changed since these suggestions were made. Regenerate to use your corrections.</span></div>
+      </sc-if>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:28px">
+        <sc-for list="{{ clips }}" as="c" hint-placeholder-count="6">
+          <article class="blueprint" style="display:flex;flex-direction:column;border-color:{{ c.border }}"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="position:relative;aspect-ratio:16/9;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-text) 7%,transparent) 7px 8px);border-bottom:1px solid var(--color-divider);display:grid;place-items:center">
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:var(--color-neutral-700);white-space:nowrap">preview frame @ {{ c.startLabel }}</span>
+              <span style="position:absolute;top:10px;left:10px;font-family:var(--font-heading);font-weight:600;font-size:14px;padding:2px 8px;background:var(--color-bg);border:1px solid var(--color-divider)">#{{ c.rank }}</span>
+              <span style="position:absolute;bottom:10px;right:10px;font-family:ui-monospace,monospace;font-size:12px;padding:2px 6px;background:var(--color-text);color:var(--color-bg)">{{ c.durationLabel }}</span>
+            </div>
+            <div style="padding:16px 18px 18px;display:flex;flex-direction:column;gap:12px;flex:1">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--color-neutral-700)"><span style="font-family:ui-monospace,monospace;white-space:nowrap">{{ c.range }}</span><span style="white-space:nowrap;flex:none">Overall {{ c.combined }}</span></div>
+              <h3 style="margin:0;font-size:24px;text-wrap:pretty">“{{ c.hook }}”</h3>
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px">
+                <sc-for list="{{ c.scores }}" as="s" hint-placeholder-count="4">
+                  <div style="display:flex;flex-direction:column;gap:4px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>{{ s.label }}</span><span style="font-family:ui-monospace,monospace">{{ s.value }}</span></div><span style="height:3px;background:var(--color-neutral-300);display:block"><span style="display:block;height:100%;width:{{ s.value }}%;background:var(--color-accent)"></span></span></div>
+                </sc-for>
+              </div>
+              <p style="margin:0;font-size:14px;color:var(--color-neutral-800);flex:1;text-wrap:pretty">{{ c.reason }}</p>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-secondary" style="flex:1" onClick="{{ c.preview }}">Preview</button>
+                <sc-if value="{{ c.notSelected }}" hint-placeholder-val="{{ true }}"><button class="btn btn-primary" style="flex:1" onClick="{{ c.select }}">Select</button></sc-if>
+                <sc-if value="{{ c.selected }}" hint-placeholder-val="{{ false }}"><button class="btn btn-secondary" style="flex:1;border-color:var(--color-accent);color:var(--color-accent-800);background:var(--color-accent-100)" onClick="{{ c.select }}">Selected ✓</button></sc-if>
+              </div>
+            </div>
+          </article>
+        </sc-for>
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--color-neutral-700);font-family:ui-monospace,monospace">{{ runMeta }}</p>
+    </div>
+  </sc-if>
+  </main>
+</sc-if>
+
+<sc-if value="{{ previewOpen }}" hint-placeholder-val="{{ false }}">
+  <div class="dialog-backdrop" onClick="{{ closePreview }}" style="z-index:40">
+    <div role="dialog" aria-modal="true" aria-label="Clip preview" class="dialog blueprint" onClick="{{ stop }}" style="width:min(760px,100%);display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;background:var(--color-bg);padding:24px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div class="blueprint" style="aspect-ratio:9/16;background:repeating-linear-gradient(135deg,transparent 0 7px,color-mix(in srgb,var(--color-text) 7%,transparent) 7px 8px);display:flex;flex-direction:column;justify-content:space-between;padding:16px 12px;border-color:var(--color-accent)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <span style="font-family:var(--font-heading);font-weight:600;font-size:18px;line-height:1.1;background:var(--color-bg);padding:6px 8px">{{ pv.hook }}</span>
+        <span style="font-family:ui-monospace,monospace;font-size:10px;text-align:center;color:var(--color-neutral-700)">9:16 crop · {{ pv.framing }}</span>
+        <span style="font-family:var(--font-heading);font-weight:600;font-size:17px;line-height:1.15;text-align:center;background:var(--color-text);color:var(--color-bg);padding:6px 8px;margin-bottom:22%">{{ pv.caption }}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Suggestion #{{ pv.rank }} · {{ pv.range }} · {{ pv.duration }}</div>
+        <h2 style="margin:0;font-size:28px">{{ pv.hook }}</h2>
+        <p style="margin:0;font-size:14px;color:var(--color-neutral-800)">{{ pv.reason }}</p>
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700);margin-top:4px">What’s said</div>
+        <p style="margin:0;font-size:15px;line-height:1.6;max-height:180px;overflow:auto">{{ pv.excerpt }}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:auto;flex-wrap:wrap">
+          <button class="btn btn-secondary" onClick="{{ closePreview }}">Close</button>
+          <button class="btn btn-primary" onClick="{{ pv.select }}">{{ pv.selectLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ testsOpen }}" hint-placeholder-val="{{ false }}">
+  <aside aria-label="Service tests" style="position:fixed;top:0;right:0;bottom:0;width:min(480px,100%);background:var(--color-bg);border-left:1px solid var(--color-divider);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;z-index:50">
+    <div style="padding:18px 20px;border-bottom:1px solid var(--color-divider);display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h3 style="margin:0">Service tests</h3><button class="btn btn-ghost" onClick="{{ toggleTests }}">Close</button></div>
+      <div style="font-size:13px;color:var(--color-neutral-800)">{{ testSummary }}</div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn btn-primary" disabled="{{ testsRunning }}" onClick="{{ runTests }}">{{ runLabel }}</button><a href="Service Tests.dc.html" style="font-size:13px">Open full test page</a></div>
+    </div>
+    <div style="overflow:auto;flex:1">
+      <sc-for list="{{ testRows }}" as="r" hint-placeholder-count="6">
+        <div style="display:grid;grid-template-columns:48px minmax(0,1fr);gap:10px;padding:10px 20px;border-bottom:1px solid var(--color-divider)">
+          <span class="{{ r.tagClass }}" style="justify-content:center;align-self:start">{{ r.status }}</span>
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px">{{ r.name }}</span><span style="font-size:11px;color:var(--color-neutral-700)">{{ r.meta }}</span><sc-if value="{{ r.error }}" hint-placeholder-val="{{ false }}"><span style="font-family:ui-monospace,monospace;font-size:11px;overflow-wrap:anywhere">{{ r.error }}</span></sc-if></div>
+        </div>
+      </sc-for>
+    </div>
+  </aside>
+</sc-if>
+
+<sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+  <div role="status" style="position:fixed;left:50%;bottom:28px;transform:translateX(-50%);padding:10px 18px;background:var(--color-text);color:var(--color-bg);font-size:14px;z-index:60;max-width:90vw">{{ toast }}</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const GOALS = [
+  { id: 'educational', label: 'Educational', desc: 'Frameworks, lessons, clear takeaways.' },
+  { id: 'entertaining', label: 'Entertaining', desc: 'Stories, humor, personality.' },
+  { id: 'viral', label: 'Viral', desc: 'Immediate hooks, surprise, debate-worthy ideas from the source.' },
+];
+const SAMPLE_SOURCE = { fileName: 'operator-hour-ep42.mp4', title: 'The Operator Hour — Ep. 42: Priya Raman on scaling to 500', mimeType: 'video/mp4', sizeBytes: 1.86e9, durationSec: 1934, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true };
+const STATUS_LABEL = { uploading: 'Uploading', transcribing: 'Transcribing', analyzing: 'Analyzing', ready: 'Ready', failed: 'Failed', canceled: 'Canceled', expired: 'Expired', draft: 'Draft' };
+const fmt = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; const p = (n) => String(n).padStart(2, '0'); return h ? h + ':' + p(m) + ':' + p(s) : m + ':' + p(s); };
+const fmtDate = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const rel = (t) => { const h = (t - Date.now()) / 3600e3; return h < 48 ? Math.max(1, Math.round(h)) + 'h' : Math.round(h / 24) + ' days'; };
+const parseAvoid = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+const idem = () => 'idem_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+class Component extends DCLogic {
+  state = {
+    route: 'boot', me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
+    projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
+    transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
+    np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
+    regen: { goal: 'educational', instruction: '', avoid: '' },
+    tests: { open: false, running: false, results: [] }, toast: null,
+  };
+
+  componentDidMount() {
+    const boot = () => {
+      if (!window.ShortsServices) return void (this.bootTimer = setTimeout(boot, 50));
+      this.api = window.ShortsServices.createApi({
+        mode: 'http',
+        baseUrl: window.SHORTS_CONFIG.apiBaseUrl,
+        onCall: (call) => { if (!call.ok && call.method !== 'signIn') this.handleAuth(call); },
+      });
+      this.setState({ route: 'login' });
+    };
+    boot();
+  }
+  componentWillUnmount() { clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); }
+
+  notify(msg) { clearTimeout(this.toastTimer); this.setState({ toast: msg }); this.toastTimer = setTimeout(() => this.setState({ toast: null }), 3200); }
+  async signIn(e) {
+    e.preventDefault();
+    if (this.state.loginBusy || !this.api) return;
+    this.setState({ loginBusy: true, loginError: null });
+    try {
+      const me = await this.api.signIn({ email: this.state.loginEmail.trim(), password: this.state.loginPassword });
+      await this.enter(me);
+    } catch (error) {
+      this.setState({ loginError: error.code === 'NETWORK_ERROR' ? 'Cannot reach the backend. Start it with make run and try again.' : error.message });
+    } finally { this.setState({ loginBusy: false, loginPassword: '' }); }
+  }
+  resetSession(message = null) {
+    this.stopPolling();
+    this.setState({ route: 'login', me: null, loginPassword: '', loginError: message,
+      projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
+      transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
+      np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
+      regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null });
+  }
+  async signOut() {
+    this.stopPolling();
+    let message = null;
+    try { await this.api.signOut(); }
+    catch (e) { message = 'Signed out locally. The backend could not be reached to revoke the session.'; }
+    finally { this.resetSession(message); }
+  }
+  async enter(me) { this.setState({ me, route: 'dashboard', loginError: null }); await this.loadDashboard(); }
+  async refreshMe() { try { this.setState({ me: await this.api.me() }); } catch (e) { this.handleAuth(e); } }
+  handleAuth(e) {
+    if (e && ['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED'].includes(e.code)) {
+      this.resetSession(e.message || window.ShortsServices.ERROR_COPY[e.code]);
+      return true;
+    }
+    return false;
+  }
+
+  async loadDashboard() {
+    try { const [projects, me] = await Promise.all([this.api.listProjects(), this.api.me()]); this.setState({ projects, me }); }
+    catch (e) { if (!this.handleAuth(e)) this.notify(e.message); }
+  }
+  go(route) { this.setState({ route, previewId: null }); if (route === 'dashboard') this.loadDashboard(); }
+
+  async openProject(p) {
+    this.setState({ projectId: p.id, project: p, transcript: null, clipsRes: null, drafts: {}, selected: {}, status: null });
+    if (p.status === 'expired') return this.notify('This project’s analysis has expired under the 30-day retention policy.');
+    if (p.status === 'ready') return this.openSuggestions(p.id);
+    this.setState({ route: 'processing' });
+    this.pollStatus(); this.startPolling();
+  }
+
+  startPolling() { this.stopPolling(); this.poller = setInterval(() => this.pollStatus(), 700); }
+  stopPolling() { clearInterval(this.poller); this.poller = null; }
+  async pollStatus() {
+    const id = this.state.projectId;
+    if (!id) return;
+    try {
+      const st = await this.api.getStatus(id);
+      if (id !== this.state.projectId) return;
+      this.setState({ status: st });
+      if (!st.stage) {
+        this.stopPolling();
+        const [project] = await Promise.all([this.api.getProject(id), this.refreshMe()]);
+        this.setState({ project });
+        if (st.jobType === 'analysis') {
+          if (st.regenError) this.notify('Regeneration failed — your previous suggestions are kept.');
+          else { await this.loadClips(id); this.notify('Suggestions regenerated.'); }
+        }
+      }
+    } catch (e) { this.handleAuth(e); }
+  }
+
+  async openSuggestions(id) {
+    this.setState({ route: 'suggestions' });
+    await this.loadClips(id);
+    if (!this.state.transcript) this.loadTranscript(id);
+  }
+  async loadClips(id) {
+    try {
+      const res = await this.api.getClips(id);
+      this.setState((s) => ({ clipsRes: res, regen: { goal: res.goal || s.regen.goal, instruction: res.instruction || '', avoid: (res.avoid || []).join(', ') } }));
+    } catch (e) { if (!this.handleAuth(e)) this.notify(e.message); }
+  }
+  async loadTranscript(id) {
+    try { this.setState({ transcript: await this.api.getTranscript(id), drafts: {} }); }
+    catch (e) { if (!this.handleAuth(e)) this.notify(e.message); }
+  }
+
+  /* new project */
+  setNp(patch) { this.setState((s) => ({ np: { ...s.np, ...patch } })); }
+  onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    this.setNp({ probing: true, error: null, code: null, source: null });
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    const done = (ok) => {
+      URL.revokeObjectURL(url);
+      this.setNp({ probing: false, source: { fileName: file.name, title: file.name.replace(/\.[^.]+$/, ''), mimeType: file.type, sizeBytes: file.size, durationSec: ok ? v.duration : 0, width: ok ? v.videoWidth : 0, height: ok ? v.videoHeight : 0, fps: 30, hasVideo: ok && v.videoWidth > 0, hasAudio: true } });
+    };
+    v.onloadedmetadata = () => done(true);
+    v.onerror = () => done(false);
+    v.src = url;
+  }
+
+  async start() {
+    const { np } = this.state;
+    const body = { goal: np.goal, instruction: np.instruction, avoid: parseAvoid(np.avoid) };
+    this.setNp({ busy: true, error: null, code: null });
+    try {
+      if (np.tab === 'url') {
+        const p = await this.api.createYoutubeProject({ url: np.url, rightsConfirmed: np.rights });
+        this.setState({ projectId: p.id, project: p, route: 'processing', status: null, transcript: null, clipsRes: null, selected: {} });
+        await this.api.processProject(p.id, body, { idempotencyKey: idem() });
+        this.afterStart();
+        return;
+      }
+      const up = await this.api.createUpload(np.source);
+      this.setState({ projectId: up.projectId, project: up.project, route: 'processing', status: null, uploading: true, uploadPct: 0, transcript: null, clipsRes: null, selected: {} });
+      // The current backend accepts metadata only and returns a mock:// upload URL.
+      // Do not pretend to transfer bytes or simulate a browser upload timer.
+      if (!up.uploadUrl.startsWith('mock://')) throw new Error('This backend requires file transfer, which this demo does not support yet.');
+      await this.api.completeUpload(up.uploadId);
+      const status = await this.api.processProject(up.projectId, body, { idempotencyKey: idem() });
+      this.setState({ uploading: false, status });
+      this.afterStart();
+    } catch (e) {
+      if (!this.handleAuth(e)) { this.setState({ route: 'new' }); this.setNp({ error: e.message, code: e.code }); }
+    } finally { this.setState({ uploading: false }); this.setNp({ busy: false }); }
+  }
+  afterStart() {
+    this.setNp({ source: null, instruction: '', avoid: '', url: '', rights: false });
+    this.refreshMe(); this.pollStatus(); this.startPolling();
+  }
+
+  async cancel() {
+    try { const st = await this.api.cancelProject(this.state.projectId); this.stopPolling(); this.setState({ status: st }); this.refreshMe(); this.notify('Processing canceled. Only processed minutes were counted.'); }
+    catch (e) { this.notify(e.message); }
+  }
+  async retry() {
+    try { await this.api.retryProject(this.state.projectId, {}, { idempotencyKey: idem() }); this.pollStatus(); this.startPolling(); }
+    catch (e) { this.notify(e.message); }
+  }
+
+  async saveTranscript() {
+    const segments = Object.entries(this.state.drafts).map(([id, text]) => ({ id, text }));
+    try {
+      const t = await this.api.saveTranscript(this.state.projectId, { segments });
+      this.setState({ transcript: t, drafts: {} });
+      this.notify('Saved as revision ' + t.revision + '.');
+      this.setState({ project: await this.api.getProject(this.state.projectId) });
+    } catch (e) { this.notify(e.message); }
+  }
+  async download(kind) {
+    try {
+      const items = await this.api.getProjectDownloads(this.state.projectId);
+      const it = items.find((i) => i.kind === kind);
+      const a = document.createElement('a'); a.href = it.url; a.download = it.filename; document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { this.notify(e.message); }
+  }
+
+  async regenerate() {
+    const { regen, projectId } = this.state;
+    try {
+      const st = await this.api.createAnalysisRun(projectId, { goal: regen.goal, instruction: regen.instruction, avoid: parseAvoid(regen.avoid) }, { idempotencyKey: idem() });
+      this.setState({ status: st, selected: {} }); this.startPolling();
+    } catch (e) { this.notify(e.message); }
+  }
+
+  async runTests() {
+    if (!window.ShortsTests) return;
+    this.setState((s) => ({ tests: { ...s.tests, running: true, results: [] } }));
+    await window.ShortsTests.run((r, all) => this.setState((s) => ({ tests: { ...s.tests, results: all.slice() } })));
+    this.setState((s) => ({ tests: { ...s.tests, running: false } }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const me = s.me;
+    const usage = me ? me.usage : { usedMinutes: 0, limitMinutes: 60, remainingMinutes: 60 };
+    const now = new Date();
+    const project = s.project || {};
+    const st = s.status;
+    const selectClip = (id) => this.setState((x) => ({ selected: { ...x.selected, [id]: !x.selected[id] } }));
+
+    // dashboard
+    const tagFor = (status) => status === 'ready' ? 'tag tag-accent' : ['failed', 'canceled', 'expired'].includes(status) ? 'tag tag-neutral' : 'tag tag-outline';
+    const projects = s.projects.map((p) => ({
+      name: p.name,
+      meta: (p.sourceType === 'youtube_url' ? 'YouTube URL' : 'Upload') + ' · ' + fmtDate(p.createdAt) + ' · ' + fmt(p.durationSec),
+      statusLabel: STATUS_LABEL[p.status] || p.status, tagClass: tagFor(p.status),
+      output: p.status === 'ready' ? p.suggestionCount + ' clips · ' + p.renderCount + ' renders' : '—',
+      expiry: p.status === 'expired' ? 'Analysis expired' : p.sourceExpiresAt ? (p.sourceExpired ? 'Source removed · analysis kept ' + rel(p.analysisExpiresAt) : 'Source kept ' + rel(p.sourceExpiresAt)) : 'Starts on processing',
+      open: () => this.openProject(p),
+    }));
+    const activeProj = me && me.activeJob ? s.projects.find((p) => p.id === me.activeJob.projectId) : null;
+
+    // new project
+    const np = s.np;
+    const src = np.source;
+    const remaining = usage.remainingMinutes;
+    const srcMin = src ? Math.ceil(src.durationSec / 60) : 0;
+    const canStart = !np.busy && (np.tab === 'upload' ? !!src : !!np.url.trim());
+    const tabBtn = (id, label) => ({ label, pressed: String(np.tab === id), bg: np.tab === id ? 'var(--color-accent)' : 'transparent', fg: np.tab === id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => this.setNp({ tab: id, error: null, code: null }) });
+
+    // processing
+    const order = ['uploading', 'transcribing', 'analyzing', 'ready'];
+    const failedIdx = st && st.failureCode === 'TRANSCRIPTION_FAILED' ? 1 : st && st.failureCode === 'ANALYSIS_FAILED' ? 2 : -1;
+    const statusKey = s.uploading ? 'uploading' : st ? st.status : project.status || 'uploading';
+    let cur = order.indexOf(statusKey);
+    if (statusKey === 'failed') cur = failedIdx;
+    const isDone = statusKey === 'ready';
+    const stages = order.map((name, i) => {
+      const done = isDone || i < cur, active = !isDone && i === cur, failed = statusKey === 'failed' && i === cur;
+      return {
+        n: '0' + (i + 1), label: STATUS_LABEL[name],
+        stateText: failed ? 'Failed' : statusKey === 'canceled' && i === Math.max(1, cur) ? 'Canceled' : done ? 'Done' : active ? 'In progress' : 'Waiting',
+        bar: failed ? 'var(--color-text)' : done || active ? 'var(--color-accent)' : 'var(--color-neutral-300)',
+        opacity: done || active || failed ? 1 : 0.55,
+      };
+    });
+    let progress = 0;
+    if (s.uploading) progress = s.uploadPct * 0.12;
+    else if (st) progress = st.status === 'ready' ? 100 : 12 + (st.progress || 0) * 88;
+    const statusText = s.uploading ? 'Preparing the demo project' :
+      statusKey === 'transcribing' ? 'Transcribing speech with word-level timestamps' :
+      statusKey === 'analyzing' ? 'Scoring moments for hook, value, clarity and visuals' :
+      statusKey === 'ready' ? (project.suggestionCount || 'Your') + ' suggestions ready' :
+      statusKey === 'failed' ? 'Stopped at ' + (STATUS_LABEL[order[cur]] || 'a step').toLowerCase() :
+      statusKey === 'canceled' ? 'Canceled — only processed minutes were counted' : 'Preparing…';
+    const procErr = st && st.status === 'failed' ? st.failureCode : null;
+
+    // transcript
+    const segments = (s.transcript ? s.transcript.segments : []).map((seg) => {
+      const draft = s.drafts[seg.id];
+      return {
+        time: fmt(seg.start), text: draft != null ? draft : seg.text, label: 'Transcript at ' + fmt(seg.start),
+        edited: draft != null && draft !== seg.text, segmentTiming: seg.timing === 'segment',
+        onChange: (e) => { const v = e.target.value; this.setState((x) => ({ drafts: { ...x.drafts, [seg.id]: v } })); },
+      };
+    });
+    const dirty = segments.filter((x) => x.edited).length;
+
+    // suggestions
+    const cr = s.clipsRes;
+    const excerptFor = (c) => {
+      if (!s.transcript) return '';
+      const words = [];
+      s.transcript.segments.forEach((seg) => seg.words.forEach((w) => { if (w.s >= c.start - 0.01 && w.e <= c.end + 0.01) words.push(w.w); }));
+      return words.join(' ');
+    };
+    const clips = (cr ? cr.clips : []).map((c) => ({
+      rank: c.rank, hook: c.hook, reason: c.reason, combined: c.combined,
+      startLabel: fmt(c.start), durationLabel: fmt(c.duration), range: fmt(c.start) + ' – ' + fmt(c.end),
+      scores: [{ label: 'Hook', value: c.scores.hook }, { label: 'Value', value: c.scores.value }, { label: 'Standalone clarity', value: c.scores.standalone }, { label: 'Visual quality', value: c.scores.visual }],
+      selected: !!s.selected[c.id], notSelected: !s.selected[c.id],
+      border: s.selected[c.id] ? 'var(--color-accent)' : 'var(--color-divider)',
+      preview: () => this.setState({ previewId: c.id }), select: () => selectClip(c.id),
+    }));
+    const regenerating = !!(st && st.stage && st.jobType === 'analysis');
+    const pc = cr && s.previewId ? cr.clips.find((c) => c.id === s.previewId) : null;
+    const excerpt = pc ? excerptFor(pc) : '';
+    const pv = pc ? {
+      rank: pc.rank, hook: pc.hook, reason: pc.reason, range: fmt(pc.start) + ' – ' + fmt(pc.end), duration: fmt(pc.duration),
+      framing: pc.scores.visual >= 80 ? 'face-tracked' : 'stable center', caption: excerpt.split(' ').slice(0, 3).join(' '),
+      excerpt: excerpt || 'Loading transcript…', selectLabel: s.selected[pc.id] ? 'Unselect' : 'Select this clip',
+      select: () => { selectClip(pc.id); this.setState({ previewId: null }); },
+    } : {};
+
+    // tests
+    const tr = s.tests.results;
+    const total = window.ShortsTests ? window.ShortsTests.list.length : 0;
+    const failed = tr.filter((r) => !r.pass).length;
+    const testRows = tr.length ? tr.map((r) => ({ status: r.pass ? 'PASS' : 'FAIL', tagClass: r.pass ? 'tag tag-accent' : 'tag tag-neutral', name: r.name, meta: r.group + ' · ' + r.ms + ' ms', error: r.pass ? '' : r.error }))
+      : (window.ShortsTests ? window.ShortsTests.list : []).map((t) => ({ status: '—', tagClass: 'tag tag-outline', name: t.name, meta: t.group, error: '' }));
+
+    const reset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return {
+      isBoot: s.route === 'boot', isLogin: s.route === 'login', isApp: !['boot', 'login'].includes(s.route),
+      isDashboard: s.route === 'dashboard', isNew: s.route === 'new', isProcessing: s.route === 'processing', isTranscript: s.route === 'transcript', isSuggestions: s.route === 'suggestions',
+      // login
+      loginEmail: s.loginEmail, loginPassword: s.loginPassword, loginBusy: s.loginBusy, loginError: s.loginError,
+      loginLabel: s.loginBusy ? 'Signing in…' : 'Sign in',
+      onLoginEmail: (e) => this.setState({ loginEmail: e.target.value }),
+      onLoginPassword: (e) => this.setState({ loginPassword: e.target.value }),
+      signIn: (e) => this.signIn(e),
+      // shell
+      userName: me ? me.user.displayName : '', usageUsed: usage.usedMinutes, usageLimit: usage.limitMinutes, usageRemaining: remaining,
+      usagePct: Math.min(100, Math.round((usage.usedMinutes / usage.limitMinutes) * 100)),
+      monthLabel: now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), resetLabel: fmtDate(reset),
+      goDashboard: () => { this.stopPolling(); this.go('dashboard'); },
+      goNew: () => { this.stopPolling(); this.go('new'); },
+      signOut: () => this.signOut(),
+      toggleTests: () => this.setState((x) => ({ tests: { ...x.tests, open: !x.tests.open } })),
+      // dashboard
+      projects, noProjects: s.projects.length === 0,
+      hasActiveJob: !!activeProj, noActiveJob: !activeProj,
+      activeJobName: activeProj ? activeProj.name : '', activeJobStage: activeProj ? (STATUS_LABEL[activeProj.status] || '') + '…' : '',
+      openActive: () => activeProj && this.openProject(activeProj),
+      // new project
+      tabs: [tabBtn('upload', 'Upload video'), ...(me && me.features.youtubeImport ? [tabBtn('url', 'YouTube URL')] : [])],
+      isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', urlImportOff: !(me && me.features.youtubeImport),
+      noSource: !src && !np.probing, probing: np.probing, hasSource: !!src,
+      srcName: src ? src.title : '', srcFile: src ? src.fileName : '',
+      srcSpecs: src ? [
+        { label: 'Duration', value: src.durationSec ? fmt(src.durationSec) : 'Unreadable' },
+        { label: 'Resolution', value: src.width ? src.width + '×' + src.height : '—' },
+        { label: 'File size', value: (src.sizeBytes / 1e9).toFixed(2) + ' GB' },
+        { label: 'Est. processing', value: '~' + Math.max(1, Math.round(src.durationSec / 60 / 3.5)) + ' min' },
+      ] : [],
+      allowanceText: src ? 'Uses ' + srcMin + ' of your ' + remaining + ' remaining processing minutes this month.' : '',
+      clearSource: () => this.setNp({ source: null, error: null, code: null }),
+      useSample: () => this.setNp({ source: SAMPLE_SOURCE, error: null, code: null }),
+      onFile: (e) => this.onFile(e),
+      npUrl: np.url, onUrl: (e) => this.setNp({ url: e.target.value }), npRights: np.rights, onRights: (e) => this.setNp({ rights: e.target.checked }),
+      npError: np.error, npErrorCode: np.code,
+      goals: GOALS.map((g) => ({ ...g, checked: String(np.goal === g.id), ring: np.goal === g.id ? 4 : 0, bg: np.goal === g.id ? 'var(--color-accent-100)' : 'transparent', pick: () => this.setNp({ goal: g.id }) })),
+      npInstruction: np.instruction, instrCount: np.instruction.length, onInstruction: (e) => this.setNp({ instruction: e.target.value }),
+      npAvoid: np.avoid, onAvoid: (e) => this.setNp({ avoid: e.target.value }),
+      cannotStart: !canStart, startLabel: np.busy ? 'Starting…' : 'Start processing', start: () => this.start(),
+      // processing
+      projName: project.name || '', stages, progressPct: Math.round(progress), statusText,
+      canCancel: !!(st && st.canCancel) && !s.uploading, cancel: () => this.cancel(),
+      canRetry: !!(st && st.canRetry), retry: () => this.retry(),
+      hasProcError: !!procErr, procErrorText: procErr ? window.ShortsServices.ERROR_COPY[procErr] : '', procErrorCode: procErr || '',
+      isDone,
+      goTranscript: () => { this.stopPolling(); this.setState({ route: 'transcript' }); this.loadTranscript(this.state.projectId); },
+      goSuggestions: () => { this.stopPolling(); this.openSuggestions(this.state.projectId); },
+      // transcript
+      segments, revision: s.transcript ? s.transcript.revision : '—', notDirty: dirty === 0,
+      saveLabel: dirty ? 'Save ' + dirty + (dirty === 1 ? ' edit' : ' edits') : 'Saved',
+      saveTranscript: () => this.saveTranscript(), downloadTxt: () => this.download('txt'), downloadJson: () => this.download('json'),
+      // suggestions
+      clips, clipsKicker: cr ? cr.clips.length + ' suggestions · ' + (GOALS.find((g) => g.id === cr.goal) || { label: '' }).label + (cr.instruction ? ' · “' + cr.instruction + '”' : '') : 'Loading suggestions…',
+      clipsStale: !!(cr && cr.stale) && !regenerating,
+      runMeta: cr ? 'run ' + cr.runId + ' · prompt ' + cr.promptVersion + ' · ' + cr.modelName : '',
+      regenGoals: GOALS.map((g) => ({ label: g.label, pressed: String(s.regen.goal === g.id), bg: s.regen.goal === g.id ? 'var(--color-accent)' : 'transparent', fg: s.regen.goal === g.id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => this.setState((x) => ({ regen: { ...x.regen, goal: g.id } })) })),
+      regenInstruction: s.regen.instruction, onRegenInstruction: (e) => { const v = e.target.value; this.setState((x) => ({ regen: { ...x.regen, instruction: v } })); },
+      regenAvoid: s.regen.avoid, onRegenAvoid: (e) => { const v = e.target.value; this.setState((x) => ({ regen: { ...x.regen, avoid: v } })); },
+      regenerating, regenPct: st ? Math.round((st.progress || 0) * 100) : 0, regenerate: () => this.regenerate(),
+      previewOpen: !!pc, pv, closePreview: () => this.setState({ previewId: null }), stop: (e) => e.stopPropagation(),
+      // tests
+      testsOpen: s.tests.open, testsRunning: s.tests.running, runLabel: s.tests.running ? 'Running…' : tr.length ? 'Run again' : 'Run all tests',
+      runTests: () => this.runTests(), testRows,
+      testSummary: tr.length ? (tr.length - failed) + ' passed · ' + failed + ' failed · ' + tr.length + ' of ' + total + ' run' : total + ' tests against the mock backend and HTTP client. Each test builds its own isolated backend with a fake clock.',
+      toast: s.toast,
+    };
+  }
+}
+</script>
+</body>
+</html>
