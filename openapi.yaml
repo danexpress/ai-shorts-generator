@@ -27,7 +27,7 @@ info:
     playback links. Selected suggestions can be rendered with FFmpeg into vertical H.264/AAC MP4 files under
     MEDIA_DIR/renders (backend/media/renders by default). Rendered files are retained for seven days, listed in project
     downloads, and available through signed preview/download URLs. Processing/transcripts/suggestions remain demo
-    content; YouTube import is disabled by default and simulated when enabled. There is no real transcription, LLM or
+    content; YouTube import is disabled by default and downloads rights-confirmed videos when enabled. There is no real transcription, LLM or
     object-storage integration.'
 servers:
 - url: /
@@ -212,8 +212,10 @@ paths:
     post:
       operationId: createYoutubeProject
       summary: Import a supported YouTube video
-      description: Requires youtubeImport feature flag and rights confirmation. Disabled by default. When enabled,
-        creates a source-ready demo project without downloading the URL; call processProject separately.
+      description: Requires YOUTUBE_IMPORT=true and explicit rights confirmation. Downloads one YouTube video to
+        private local source storage before returning a source-ready project. Supports watch and short-link URLs only;
+        playlists are ignored. Enforces a 30-second to 60-minute duration and 4-GiB file size limit. Call processProject
+        separately after a successful download.
       requestBody:
         required: true
         content:
@@ -235,6 +237,10 @@ paths:
           $ref: '#/components/responses/Error403'
         '422':
           $ref: '#/components/responses/Error422'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '415':
+          $ref: '#/components/responses/Error415'
         '500':
           $ref: '#/components/responses/Error500'
         '503':
@@ -1281,8 +1287,7 @@ components:
         url:
           type: string
           format: uri
-          description: HTTPS youtube.com, www.youtube.com or m.youtube.com /watch?v=ID, or youtu.be/ID. Current
-            mock accepts IDs matching [\w-]{6,15}.
+          description: HTTPS youtube.com, www.youtube.com or m.youtube.com /watch?v=ID, or youtu.be/ID. IDs must match [\w-]{6,15}.
         rightsConfirmed:
           type: boolean
           enum:
@@ -1680,6 +1685,7 @@ components:
               - ANALYSIS_FAILED
               - IMPORT_UNAVAILABLE
               - UNSUPPORTED_URL
+              - DOWNLOAD_FAILED
               - RIGHTS_NOT_CONFIRMED
               - MONTHLY_LIMIT_REACHED
               - ACTIVE_JOB_EXISTS
@@ -1768,7 +1774,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Error422:
-      description: INVALID_INPUT, SOURCE_TOO_LONG, SOURCE_TOO_SHORT, MEDIA_PROBE_FAILED, UNSUPPORTED_URL or RIGHTS_NOT_CONFIRMED
+      description: INVALID_INPUT, DOWNLOAD_FAILED, SOURCE_TOO_LONG, SOURCE_TOO_SHORT, SOURCE_TOO_LARGE, MEDIA_PROBE_FAILED, UNSUPPORTED_URL or RIGHTS_NOT_CONFIRMED
         — request validation failed.
       content:
         application/json:

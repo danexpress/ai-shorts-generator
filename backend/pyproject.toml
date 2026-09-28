@@ -9,6 +9,7 @@ dependencies = [
   "pwdlib[argon2]>=0.2,<1",
   "sqlalchemy>=2.0,<3",
   "imageio-ffmpeg>=0.6.0",
+  "yt-dlp>=2025.6.30,<2027",
 ]
 
 [dependency-groups]

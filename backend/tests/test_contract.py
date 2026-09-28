@@ -75,13 +75,35 @@ def test_every_protected_route_requires_bearer(client, path, method):
     assert_error(response, 401, "UNAUTHENTICATED")
 
 
-def test_every_operation_response_matches_root_spec(client, clock, database, app, monkeypatch):
-    from app.routers import renders
+def test_every_operation_response_matches_root_spec(
+    client, clock, database, app, monkeypatch, tmp_path
+):
+    from app.routers import projects, renders
 
     def fake_render(source, destination, start, duration, resolution, configured_ffmpeg):
         destination.write_bytes(b"rendered mp4")
 
     monkeypatch.setattr(renders, "render_short", fake_render)
+
+    def fake_youtube_download(url, destination_dir, ffmpeg_binary, before_download):
+        before_download(180)
+        work = tmp_path / "youtube-contract-fixture"
+        work.mkdir(exist_ok=True)
+        path = work / "abcdefghijk.mp4"
+        path.write_bytes(b"youtube bytes")
+        return {
+            "path": path,
+            "fileName": "YouTube fixture.mp4",
+            "title": "YouTube fixture",
+            "durationSec": 180,
+            "width": 1280,
+            "height": 720,
+            "fps": 30,
+            "sizeBytes": path.stat().st_size,
+            "mimeType": "video/mp4",
+        }
+
+    monkeypatch.setattr(projects, "download_youtube", fake_youtube_download)
     signin = check(
         client.post(
             "/v1/auth/google", json={"email": "maya@example.com", "password": "DemoPass123!"}

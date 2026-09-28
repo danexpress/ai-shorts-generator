@@ -43,6 +43,7 @@
     ANALYSIS_FAILED: 'Finding clips failed. Retry — your transcript is kept.',
     IMPORT_UNAVAILABLE: 'URL import isn’t available right now. Upload the video file instead.',
     UNSUPPORTED_URL: 'Only public youtube.com or youtu.be video links are supported.',
+    DOWNLOAD_FAILED: 'The video could not be downloaded from YouTube. Try uploading the file instead.',
     RIGHTS_NOT_CONFIRMED: 'Confirm you have the rights to reuse this video.',
     MONTHLY_LIMIT_REACHED: 'This would exceed your 60 processing minutes for the month.',
     ACTIVE_JOB_EXISTS: 'You already have a video processing. Wait for it to finish.',

@@ -35,6 +35,10 @@ class Settings:
     analysis_retention_days: int = 30
     render_retention_days: int = 7
     history_retention_days: int = 90
-    youtube_import: bool = False
+    youtube_import: bool = field(
+        default_factory=lambda: (
+            os.environ.get("YOUTUBE_IMPORT", "false").lower() in {"1", "true", "yes"}
+        )
+    )
     # Explicit allowlist: no wildcard origins with browser credentials.
     cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")

@@ -160,6 +160,7 @@
           </sc-if>
           <sc-if value="{{ isUrlTab }}" hint-placeholder-val="{{ false }}">
             <div class="field"><label for="yt-url">Public YouTube URL</label><input id="yt-url" class="input" placeholder="https://www.youtube.com/watch?v=…" value="{{ npUrl }}" onChange="{{ onUrl }}"></div>
+            <div style="font-size:13px;color:var(--color-neutral-800)">The backend downloads the video before processing. Public watch links and youtu.be links are supported, up to 60 minutes and 4 GB.</div>
             <label class="radio" style="align-items:flex-start;font-size:13px"><input type="checkbox" checked="{{ npRights }}" onChange="{{ onRights }}"><span class="dot" style="border-radius:0;margin-top:2px"></span><span>I have the rights or permission to reuse this video. A public link doesn’t grant reuse rights on its own.</span></label>
             <sc-if value="{{ urlImportOff }}" hint-placeholder-val="{{ true }}">
               <div style="font-size:13px;color:var(--color-neutral-800)">URL import is an experimental beta feature and is currently off. Upload the file instead.</div>

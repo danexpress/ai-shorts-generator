@@ -16,6 +16,8 @@ The default file is `backend/ai_shorts.db`, independent of the current working d
 
 The first server start creates the schema and demo rows. Set `SEED_DEMO_DATA=false` to disable demo seeding for a new database. Seeding runs once and only if no users exist; restarting does not overwrite or duplicate data. Schema changes require migrations: `create_all` creates missing tables but does not migrate existing ones.
 
+To enable YouTube URL import, set `YOUTUBE_IMPORT=true` before starting the server. The New Project screen accepts public YouTube watch and `youtu.be` links, requires the rights confirmation, downloads the video to `MEDIA_DIR/sources/`, and then lets the normal processing flow run. It enforces a 30-second minimum, 60-minute maximum, and 4-GiB download cap. Import is disabled by default. The downloader is yt-dlp; make sure your use complies with YouTube's terms and you have permission to download and reuse the video.
+
 Uploaded source videos are stored by default under `backend/media/sources/` using opaque filenames. Set `MEDIA_DIR` to change the storage root. Browser playback streams byte ranges through short-lived signed URLs, allowing seeking without downloading the whole file. Select a suggestion and choose **Render Short** to create a vertical 1080p MP4 (or call `POST /v1/projects/{id}/render` with resolution `720` or `1080`). The backend stores rendered files under `backend/media/renders/` by default, exposes preview/download links in the project downloads, and removes rendered files after seven days or when the project is deleted. `imageio-ffmpeg` supplies FFmpeg; set `FFMPEG_BIN` to use a system FFmpeg binary instead. Set `MEDIA_SIGNING_KEY` to a private random value outside local development.
 
 Use one application process with SQLite for local development. SQLite serializes writes, and demo jobs advance as API requests arrive. PostgreSQL can be used for a multi-process deployment after adding its driver and migrations.
@@ -50,7 +52,7 @@ The frontend already uses password sign-in and adds the bearer token automatical
 
 ## Backend behavior
 
-Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions, metadata generation, and object storage are not implemented. Optional YouTube import only simulates creation and never fetches the supplied URL.
+Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions, metadata generation, and object storage are not implemented. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
 
@@ -61,6 +63,7 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - `app/store.py`: database operations, seed content, simulated jobs, usage, retention.
 - `app/routers/`: auth, upload, project, media, render, transcript, analysis, and usage APIs.
 - `app/renderer.py`: FFmpeg vertical MP4 rendering.
+- `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 
 Run `make test` and `make lint` from the repository root. Tests cover all 24 routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.

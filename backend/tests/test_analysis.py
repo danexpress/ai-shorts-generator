@@ -146,7 +146,28 @@ def test_downloads_contain_corrected_unicode_and_real_byte_lengths(client, heade
         assert len(content.encode("utf-8")) == item["bytes"]
 
 
-def test_youtube_flag_and_rights(client, headers, database, app):
+def test_youtube_flag_and_rights(client, headers, database, app, monkeypatch, settings):
+    from app.routers import projects
+
+    def fake_download(url, destination_dir, ffmpeg_binary, before_download):
+        before_download(180)
+        work = destination_dir / "fixture"
+        work.mkdir(parents=True)
+        path = work / "abcdefghijk.mp4"
+        path.write_bytes(b"downloaded youtube source")
+        return {
+            "path": path,
+            "fileName": "A useful video.mp4",
+            "title": "A useful video",
+            "durationSec": 180,
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "sizeBytes": path.stat().st_size,
+            "mimeType": "video/mp4",
+        }
+
+    monkeypatch.setattr(projects, "download_youtube", fake_download)
     body = {"url": "https://youtu.be/abcdefghijk", "rightsConfirmed": True}
     assert_error(
         client.post("/v1/projects/youtube", headers=headers, json=body), 503, "IMPORT_UNAVAILABLE"
@@ -160,9 +181,14 @@ def test_youtube_flag_and_rights(client, headers, database, app):
     response = client.post("/v1/projects/youtube", headers=headers, json=body)
     assert response.status_code == 200
     assert response.json()["sourceType"] == "youtube_url"
+    project_id = response.json()["id"]
+    source_path = settings.media_dir / "sources" / f"{project_id}.mp4"
+    assert source_path.read_bytes() == b"downloaded youtube source"
+    playback = client.post(f"/v1/projects/{project_id}/playback", headers=headers).json()
+    assert client.get(playback["url"]).status_code == 200
     assert (
         client.post(
-            f"/v1/projects/{response.json()['id']}/process", headers=headers, json={"goal": "viral"}
+            f"/v1/projects/{project_id}/process", headers=headers, json={"goal": "viral"}
         ).status_code
         == 200
     )
