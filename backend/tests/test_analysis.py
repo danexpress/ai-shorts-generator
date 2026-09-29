@@ -146,11 +146,14 @@ def test_downloads_contain_corrected_unicode_and_real_byte_lengths(client, heade
         assert len(content.encode("utf-8")) == item["bytes"]
 
 
-def test_youtube_flag_and_rights(client, headers, database, app, monkeypatch, settings):
+@pytest.mark.parametrize("duration", [180, 10800])
+def test_youtube_flag_and_rights(
+    client, headers, database, app, monkeypatch, settings, clock, duration
+):
     from app.routers import projects
 
     def fake_download(url, destination_dir, ffmpeg_binary, before_download):
-        before_download(180)
+        before_download(duration)
         work = destination_dir / "fixture"
         work.mkdir(parents=True)
         path = work / "abcdefghijk.mp4"
@@ -159,7 +162,7 @@ def test_youtube_flag_and_rights(client, headers, database, app, monkeypatch, se
             "path": path,
             "fileName": "A useful video.mp4",
             "title": "A useful video",
-            "durationSec": 180,
+            "durationSec": duration,
             "width": 1920,
             "height": 1080,
             "fps": 30,
@@ -181,6 +184,7 @@ def test_youtube_flag_and_rights(client, headers, database, app, monkeypatch, se
     response = client.post("/v1/projects/youtube", headers=headers, json=body)
     assert response.status_code == 200
     assert response.json()["sourceType"] == "youtube_url"
+    assert response.json()["durationSec"] == duration
     project_id = response.json()["id"]
     source_path = settings.media_dir / "sources" / f"{project_id}.mp4"
     assert source_path.read_bytes() == b"downloaded youtube source"
@@ -192,6 +196,12 @@ def test_youtube_flag_and_rights(client, headers, database, app, monkeypatch, se
         ).status_code
         == 200
     )
+    clock.advance(8)
+    assert (
+        client.get(f"/v1/projects/{project_id}/status", headers=headers).json()["status"] == "ready"
+    )
+    clips = client.get(f"/v1/projects/{project_id}/clips", headers=headers).json()["clips"]
+    assert len(clips) == (10 if duration == 10800 else 3)
 
 
 @pytest.mark.parametrize(

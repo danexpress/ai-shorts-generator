@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 
 from ..auth import StoreDep, UserDep
 from ..errors import ApiError
+from ..media_limits import MAX_SOURCE_BYTES, MAX_SOURCE_DURATION_SEC, MIN_SOURCE_DURATION_SEC
 from ..models import MediaUploadResult, Project, UploadRequest, UploadSession
 from ..store import oid
 
@@ -15,7 +16,7 @@ def validate_media(body: UploadRequest):
         body.mimeType and not body.mimeType.startswith("video/")
     ):
         raise ApiError("UNSUPPORTED_MEDIA", "Upload an MP4, MOV or WebM video.", 415)
-    if body.sizeBytes > 4 * 1024**3:
+    if body.sizeBytes > MAX_SOURCE_BYTES:
         raise ApiError("SOURCE_TOO_LARGE", "Files can be up to 4 GiB.", 413)
     if (
         not body.hasVideo
@@ -28,9 +29,9 @@ def validate_media(body: UploadRequest):
         raise ApiError(
             "UNSUPPORTED_MEDIA", "Video dimensions or frame rate exceed the limits.", 415
         )
-    if body.durationSec > 3600:
-        raise ApiError("SOURCE_TOO_LONG", "Sources can be up to 60 minutes.", 422)
-    if body.durationSec < 30:
+    if body.durationSec > MAX_SOURCE_DURATION_SEC:
+        raise ApiError("SOURCE_TOO_LONG", "Sources can be up to 3 hours.", 422)
+    if body.durationSec < MIN_SOURCE_DURATION_SEC:
         raise ApiError("SOURCE_TOO_SHORT", "Sources must have at least 30 seconds of video.", 422)
 
 
@@ -66,7 +67,7 @@ async def upload_media(id: str, request: Request, store: StoreDep, user: UserDep
     if not suffix:
         raise ApiError("UNSUPPORTED_MEDIA", "Upload an MP4, MOV or WebM video.", 415)
     declared = request.headers.get("content-length")
-    if declared and int(declared) > 4 * 1024**3:
+    if declared and int(declared) > MAX_SOURCE_BYTES:
         raise ApiError("SOURCE_TOO_LARGE", "Files can be up to 4 GiB.", 413)
 
     media_dir = store.settings.media_dir / "sources"
@@ -79,7 +80,7 @@ async def upload_media(id: str, request: Request, store: StoreDep, user: UserDep
         with temporary.open("wb") as output:
             async for chunk in request.stream():
                 received += len(chunk)
-                if received > min(project.sizeBytes, 4 * 1024**3):
+                if received > min(project.sizeBytes, MAX_SOURCE_BYTES):
                     raise ApiError(
                         "SOURCE_TOO_LARGE", "Uploaded bytes exceed the declared file size.", 413
                     )

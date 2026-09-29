@@ -214,7 +214,7 @@ paths:
       summary: Import a supported YouTube video
       description: Requires YOUTUBE_IMPORT=true and explicit rights confirmation. Downloads one YouTube video to
         private local source storage before returning a source-ready project. Supports watch and short-link URLs only;
-        playlists are ignored. Enforces a 30-second to 60-minute duration and 4-GiB file size limit. Call processProject
+        playlists are ignored. Enforces a 30-second to 3-hour duration and 4-GiB file size limit. Call processProject
         separately after a successful download.
       requestBody:
         required: true
@@ -1207,7 +1207,7 @@ components:
         durationSec:
           type: number
           minimum: 30
-          maximum: 3600
+          maximum: 10800
         width:
           type: integer
           minimum: 1

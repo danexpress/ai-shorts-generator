@@ -48,7 +48,7 @@ PUBLISH-READY ASSETS
 The MVP must:
 
 1. Let an invited creator authenticate with Google.
-2. Accept a supported video upload up to 60 minutes.
+2. Accept a supported video upload up to 3 hours.
 3. Support an experimental YouTube URL import path when a compliant ingestion method is available.
 4. Generate an editable transcript with word-level timestamps.
 5. Let the creator choose an analysis goal: **Educational**, **Entertaining**, or **Viral**.
@@ -333,7 +333,7 @@ Recommended hard limits:
 
 | Limit | MVP value |
 | --- | ---: |
-| Maximum source duration | 60 minutes |
+| Maximum source duration | 3 hours |
 | Maximum source file size | 4 GB |
 | Minimum useful source duration | 30 seconds |
 | Final clip duration | 15–90 seconds |
@@ -1924,7 +1924,7 @@ MVP cost controls:
 - 60 processed source minutes/month/user
 - invitation-only access
 - one compute-intensive job/user
-- 60-minute source cap
+- 3-hour source cap
 - 4-GB source cap
 - low-resolution analysis proxies
 - reuse transcript/visual analysis during regeneration
@@ -1950,7 +1950,7 @@ The MVP is accepted when all of the following are true.
 1. An invited creator can sign in with Google and a non-invited Google user cannot enter the beta application.
 2. Creator A cannot access Creator B's project, transcript, media, suggestion, render, or download by changing an identifier.
 3. A creator can upload a valid MP4, MOV, or WebM source within the configured size/duration limits.
-4. The system rejects a source over 60 minutes with a clear stable error.
+4. The system rejects a source over 3 hours with a clear stable error.
 5. The system rejects malformed/unsupported media without starting expensive analysis.
 6. A valid source produces an auto-detected-language transcript with timestamped segments and word timing where supported.
 7. A creator can correct transcript text and save a new transcript revision.
@@ -2388,7 +2388,7 @@ Requirements:
 8. Reject:
    - unreadable media
    - unsupported containers/streams
-   - videos longer than 60 minutes
+   - videos longer than 3 hours
    - files larger than the configured 4 GB limit
 9. Generate an opaque project ID.
 10. Implement GET /v1/projects/{project_id}.
@@ -2430,7 +2430,7 @@ Acceptance criteria:
 - I can upload a valid small MP4 and receive a project ID.
 - GET returns accurate ffprobe metadata.
 - Unsupported/malformed media is rejected with a stable error.
-- A video whose probed duration exceeds 60 minutes is rejected.
+- A video whose probed duration exceeds 3 hours is rejected.
 - DELETE removes both the local file and project record.
 - Tests pass.
 ```
@@ -2569,7 +2569,7 @@ The strongest product signal is not that processing finished. It is that the cre
 
 ## 33. Final MVP scope in one sentence
 
-> An invite-only creator tool that accepts up to a 60-minute long-form video, transcribes and analyzes it, recommends 3–10 coherent high-potential moments, lets the creator preview and lightly customize one moment at a time, and renders a downloadable 9:16 Short with stable smart framing, highlighted captions, an editable hook, optional watermark, basic audio cleanup, cover image, and platform-specific posting metadata.
+> An invite-only creator tool that accepts up to a 3-hour long-form video, transcribes and analyzes it, recommends 3–10 coherent high-potential moments, lets the creator preview and lightly customize one moment at a time, and renders a downloadable 9:16 Short with stable smart framing, highlighted captions, an editable hook, optional watermark, basic audio cleanup, cover image, and platform-specific posting metadata.
 
 ---
 

@@ -245,9 +245,9 @@ class Component extends DCLogic {
     v.preload = 'metadata';
     const done = (ok) => {
       if (version !== this.probeVersion) { URL.revokeObjectURL(url); return; }
-      if (ok && (!Number.isFinite(v.duration) || v.duration < 30 || v.duration > 3600 || file.size > 4 * 1024 ** 3)) {
+      if (ok && (!Number.isFinite(v.duration) || v.duration < window.ShortsServices.CONFIG.minDurationSec || v.duration > window.ShortsServices.CONFIG.maxDurationSec || file.size > window.ShortsServices.CONFIG.maxBytes)) {
         URL.revokeObjectURL(url); this.setState({ pendingPreviewUrl: null, pendingFile: null });
-        this.setNp({ probing: false, source: null, error: 'Choose a video between 30 seconds and 60 minutes, up to 4 GB.' }); return;
+        this.setNp({ probing: false, source: null, error: 'Choose a video between 30 seconds and 3 hours, up to 4 GB.' }); return;
       }
       if (!ok) {
         URL.revokeObjectURL(url); this.setState({ pendingPreviewUrl: null, pendingFile: null });

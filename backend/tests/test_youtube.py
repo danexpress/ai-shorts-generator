@@ -36,7 +36,8 @@ def test_youtube_urls_reject_untrusted_hosts_and_shapes(url):
         youtube.normalize_youtube_url(url)
 
 
-def test_download_youtube_saves_one_capped_source(monkeypatch, tmp_path):
+@pytest.mark.parametrize("duration", [95, 3601, 10800])
+def test_download_youtube_saves_one_capped_source(monkeypatch, tmp_path, duration):
     observed = {}
 
     class FakeDownloader:
@@ -55,7 +56,7 @@ def test_download_youtube_saves_one_capped_source(monkeypatch, tmp_path):
             return {
                 "id": "abcDEF_1234",
                 "title": "Creator's episode",
-                "duration": 95,
+                "duration": duration,
                 "filesize": 1024,
                 "width": 1920,
                 "height": 1080,
@@ -76,9 +77,9 @@ def test_download_youtube_saves_one_capped_source(monkeypatch, tmp_path):
     )
 
     assert result["path"].read_bytes() == b"downloaded source"
-    assert result["durationSec"] == 95
+    assert result["durationSec"] == duration
     assert result["mimeType"] == "video/mp4"
-    assert quota == [95.0]
+    assert quota == [float(duration)]
     assert observed["url"] == "https://www.youtube.com/watch?v=abcDEF_1234"
     assert observed["metadata_download"] is False
     assert observed["download_urls"] == [observed["url"]]
@@ -101,16 +102,18 @@ def test_download_checks_duration_before_fetching_bytes(monkeypatch, tmp_path):
             return False
 
         def extract_info(self, _url, download):
-            return {"id": "abcDEF_1234", "duration": 3601}
+            return {"id": "abcDEF_1234", "duration": 10801}
 
         def download(self, _urls):
-            self.downloaded = True
+            type(self).downloaded = True
 
     monkeypatch.setattr(youtube.yt_dlp, "YoutubeDL", FakeDownloader)
     monkeypatch.setattr(youtube, "ffmpeg_path", lambda _configured: "/fake/ffmpeg")
     with pytest.raises(youtube.VideoLimitError) as error:
         youtube.download_youtube("https://youtu.be/abcDEF_1234", tmp_path)
     assert error.value.code == "SOURCE_TOO_LONG"
+    assert not FakeDownloader.downloaded
+    assert not list(tmp_path.rglob("*.mp4"))
 
 
 def test_progress_hook_aborts_after_size_limit(monkeypatch, tmp_path):

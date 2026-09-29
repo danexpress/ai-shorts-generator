@@ -19,7 +19,7 @@ from app.db_models import (
         ({"mimeType": "application/octet-stream"}, 415, "UNSUPPORTED_MEDIA"),
         ({"sizeBytes": 4294967297}, 413, "SOURCE_TOO_LARGE"),
         ({"durationSec": 29}, 422, "SOURCE_TOO_SHORT"),
-        ({"durationSec": 3601}, 422, "SOURCE_TOO_LONG"),
+        ({"durationSec": 10801}, 422, "SOURCE_TOO_LONG"),
         ({"durationSec": 0}, 422, "MEDIA_PROBE_FAILED"),
         ({"hasVideo": False}, 422, "MEDIA_PROBE_FAILED"),
         ({"hasAudio": False}, 422, "MEDIA_PROBE_FAILED"),
@@ -321,3 +321,22 @@ def test_expiry_removes_content_but_keeps_history(client, headers, clock, databa
     assert client.get("/v1/usage", headers=headers).json()["usedMinutes"] == 0
     clock.advance(60 * 86400)
     assert_error(client.get(f"/v1/projects/{pid}", headers=login(client)), 404, "NOT_FOUND")
+
+
+@pytest.mark.parametrize("duration", [3601, 10800])
+def test_long_uploads_process_and_charge_full_source_duration(client, headers, clock, duration):
+    entries_before = client.get("/v1/usage", headers=headers).json()["entries"]
+    seconds_before = sum(
+        entry["processedSeconds"] + entry["adjustmentSeconds"] for entry in entries_before
+    )
+    pid = ready(client, headers, clock, durationSec=duration)
+    project = client.get(f"/v1/projects/{pid}", headers=headers).json()
+    assert project["durationSec"] == duration
+    assert project["status"] == "ready"
+    clips = client.get(f"/v1/projects/{pid}/clips", headers=headers).json()["clips"]
+    assert len(clips) == 10
+    assert all(0 <= clip["start"] < clip["end"] <= duration for clip in clips)
+    usage = client.get("/v1/usage", headers=headers).json()
+    assert usage["usedMinutes"] == (seconds_before + duration + 59) // 60
+    entry = next(item for item in usage["entries"] if item["projectId"] == pid)
+    assert entry["processedSeconds"] == duration

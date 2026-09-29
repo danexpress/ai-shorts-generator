@@ -760,7 +760,7 @@
       h(
         "span",
         { className: "small muted" },
-        "MP4, MOV, WebM · 30 seconds–60 minutes · Up to 4 GB",
+        "MP4, MOV, WebM · 30 seconds–3 hours · Up to 4 GB",
       ),
     );
   }
@@ -827,7 +827,7 @@
                 {
                   id: "youtube-url",
                   label: "YouTube video URL",
-                  hint: "Public videos, 30 seconds–60 minutes. The video is downloaded before analysis.",
+                  hint: "Public videos, 30 seconds–3 hours. The video is downloaded before analysis.",
                 },
                 h("input", {
                   id: "youtube-url",

@@ -19,7 +19,7 @@ Video previews preserve the full source frame. Clip previews stop at the selecte
 
 The existing API renders MP4 videos and exports TXT/JSON transcripts. Caption styles, burned-in hook text, watermark rendering, cover/SRT/ASS downloads, and generated platform metadata are not implemented by the API. Their requested UI surfaces are clearly marked unavailable. Unavailable caption/branding controls and additional downloads sit in compact disclosures so the primary workflow stays clear. The suggested hook can be copied for publishing; the UI does not fabricate platform-specific metadata or imply that disabled settings affect the exported video.
 
-Source retention is 24 hours; rendered files are retained for 7 days; analysis for 30 days. The upload contract accepts MP4/MOV/WebM, 30 seconds–60 minutes, up to 4 GB. YouTube import appears only when the backend enables it (`YOUTUBE_IMPORT=true`).
+Source retention is 24 hours; rendered files are retained for 7 days; analysis for 30 days. The upload contract accepts MP4/MOV/WebM, 30 seconds–3 hours, up to 4 GB. YouTube import appears only when the backend enables it (`YOUTUBE_IMPORT=true`).
 
 ## Verification
 

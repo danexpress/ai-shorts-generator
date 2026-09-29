@@ -13,7 +13,7 @@
 
   const CONFIG = {
     containers: ['mp4', 'mov', 'webm'],
-    maxDurationSec: 3600,
+    maxDurationSec: 3 * 60 * 60,
     minDurationSec: 30,
     maxBytes: 4 * 1024 ** 3,
     maxDimension: 7680,
@@ -35,7 +35,7 @@
 
   const ERROR_COPY = {
     UNSUPPORTED_MEDIA: 'This file type or stream isn’t supported. Upload an MP4, MOV or WebM.',
-    SOURCE_TOO_LONG: 'Sources can be up to 60 minutes. Trim the video and try again.',
+    SOURCE_TOO_LONG: 'Sources can be up to 3 hours. Trim the video and try again.',
     SOURCE_TOO_SHORT: 'Sources need at least 30 seconds of video.',
     SOURCE_TOO_LARGE: 'Files can be up to 4 GB. Export a smaller file and try again.',
     MEDIA_PROBE_FAILED: 'We couldn’t read this video. Re-export it and try again.',

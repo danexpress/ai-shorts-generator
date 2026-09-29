@@ -12,11 +12,11 @@ import yt_dlp
 from yt_dlp.utils import DownloadError
 
 from .errors import ApiError
+from .media_limits import MAX_SOURCE_BYTES as MAX_BYTES
+from .media_limits import MAX_SOURCE_DURATION_SEC as MAX_DURATION
+from .media_limits import MIN_SOURCE_DURATION_SEC as MIN_DURATION
 from .renderer import ffmpeg_path
 
-MAX_BYTES = 4 * 1024**3
-MAX_DURATION = 60 * 60
-MIN_DURATION = 30
 VIDEO_ID_RE = re.compile(r"[\w-]{6,15}", flags=re.ASCII)
 
 
@@ -71,7 +71,7 @@ def _validate_info(info: dict) -> tuple[float, int]:
     if duration < MIN_DURATION:
         raise VideoLimitError("SOURCE_TOO_SHORT", "Sources must have at least 30 seconds of video.")
     if duration > MAX_DURATION:
-        raise VideoLimitError("SOURCE_TOO_LONG", "Sources can be up to 60 minutes.")
+        raise VideoLimitError("SOURCE_TOO_LONG", "Sources can be up to 3 hours.")
     if size is not None and size > MAX_BYTES:
         raise VideoLimitError("SOURCE_TOO_LARGE", "Files can be up to 4 GiB.")
     return float(duration), int(size or 0)

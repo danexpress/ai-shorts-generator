@@ -100,13 +100,25 @@
   test('Contract', 'rejects invalid media before creating a project', async () => {
     const { api } = env(); await signIn(api);
     const before = (await api.listProjects()).length;
-    await assert.rejects(api.createUpload({ ...SRC, durationSec: 3601 }), 'SOURCE_TOO_LONG');
+    await assert.rejects(api.createUpload({ ...SRC, durationSec: 10801 }), 'SOURCE_TOO_LONG');
     await assert.rejects(api.createUpload({ ...SRC, sizeBytes: 5 * 1024 ** 3 }), 'SOURCE_TOO_LARGE');
     await assert.rejects(api.createUpload({ ...SRC, fileName: 'clip.avi' }), 'UNSUPPORTED_MEDIA');
     await assert.rejects(api.createUpload({ ...SRC, hasVideo: false }), 'MEDIA_PROBE_FAILED');
     await assert.rejects(api.createUpload({ ...SRC, durationSec: 20 }), 'SOURCE_TOO_SHORT');
     await assert.rejects(api.createUpload({ ...SRC, width: 12000 }), 'UNSUPPORTED_MEDIA');
     assert.eq((await api.listProjects()).length, before, 'no projects created');
+  });
+  test('Contract', 'accepts a three-hour source with sufficient processing allowance', async () => {
+    const originalLimit = S.CONFIG.monthlyMinutes;
+    try {
+      S.CONFIG.monthlyMinutes = 240;
+      const { api, clock } = env(); await signIn(api);
+      const id = await ready(api, clock, { goal: 'educational' }, { durationSec: 10800 });
+      assert.eq((await api.getProject(id)).durationSec, 10800);
+      assert.eq((await api.getClips(id)).clips.length, 10);
+      const entry = (await api.getUsage()).entries.find(e => e.projectId === id);
+      assert.eq(entry.processedSeconds, 10800);
+    } finally { S.CONFIG.monthlyMinutes = originalLimit; }
   });
   test('Contract', 'full pipeline moves uploading → transcribing → analyzing → ready', async () => {
     const { api, clock } = env(); await signIn(api);
@@ -318,7 +330,7 @@
     assert.eq(r.accepted.length, 2); assert.eq(r.rejected[0].reason, 'OVERLAP');
   });
   test('AI validation', 'suggestion count follows source duration', async () => {
-    [[300, 3], [599, 3], [600, 5], [1199, 5], [1934, 7], [2400, 10], [3600, 10]].forEach(([s, n]) => assert.eq(S.suggestionCount(s), n, s + 's'));
+    [[300, 3], [599, 3], [600, 5], [1199, 5], [1934, 7], [2400, 10], [3600, 10], [10800, 10]].forEach(([s, n]) => assert.eq(S.suggestionCount(s), n, s + 's'));
   });
   test('AI validation', 'combined score uses configured 30/30/25/15 weights', async () => {
     assert.eq(S.combinedScore({ hook: 100, value: 0, standalone: 0, visual: 0 }), 30);

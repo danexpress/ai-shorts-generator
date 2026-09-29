@@ -98,14 +98,14 @@ test('missing login token is an explicit server error', async () => {
   await assert.rejects(api.signIn({ email: 'maya@example.com', password: 'secret' }), { code: 'SERVER_ERROR' });
 });
 
-function component(services, baseUrl = 'http://api.test') {
+function component(services, baseUrl = 'http://api.test', globals = {}) {
   const html = fs.readFileSync(path.join(__dirname, 'AI Shorts Generator.dc.html'), 'utf8');
   const script = html.match(/<script type="text\/x-dc"[^>]*>([\s\S]*?)<\/script>/)[1];
   class DCLogic {
     props = {};
     setState(update) { this.state = { ...this.state, ...(typeof update === 'function' ? update(this.state) : update) }; }
   }
-  const context = vm.createContext({ DCLogic, URL, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval });
+  const context = vm.createContext({ DCLogic, URL, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
   return vm.runInContext(script + '\nnew Component()', context);
 }
 
@@ -321,3 +321,28 @@ test('a finished render does not pull the user away from another screen', async 
   assert.equal(page.state.result.url, 'http://api.test/media/render.mp4');
   assert.match(page.state.toast, /Short is ready/);
 });
+
+
+for (const duration of [10800, 10801]) {
+  test(`source selection ${duration === 10800 ? 'accepts three hours' : 'rejects more than three hours'}`, t => {
+    const video = { duration, videoWidth: 1920, videoHeight: 1080 };
+    const page = component(S, 'http://api.test', {
+      document: { createElement: () => video },
+      URL: { createObjectURL: () => 'blob:long-source', revokeObjectURL() {} },
+    });
+    t.after(() => page.componentWillUnmount());
+    const file = { name: 'long-episode.mp4', type: 'video/mp4', size: 1000 };
+    page.onFile({ target: { files: [file] } });
+    video.onloadedmetadata();
+    assert.equal(page.state.np.probing, false);
+    if (duration === 10800) {
+      assert.equal(page.state.np.source.durationSec, 10800);
+      assert.equal(page.state.pendingFile, file);
+      assert.equal(page.state.np.error, null);
+    } else {
+      assert.equal(page.state.np.source, null);
+      assert.equal(page.state.pendingFile, null);
+      assert.match(page.state.np.error, /3 hours/);
+    }
+  });
+}
