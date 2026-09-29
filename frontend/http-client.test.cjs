@@ -105,7 +105,7 @@ function component(services, baseUrl = 'http://api.test') {
     props = {};
     setState(update) { this.state = { ...this.state, ...(typeof update === 'function' ? update(this.state) : update) }; }
   }
-  const context = vm.createContext({ DCLogic, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval });
+  const context = vm.createContext({ DCLogic, URL, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval });
   return vm.runInContext(script + '\nnew Component()', context);
 }
 
@@ -140,7 +140,7 @@ test('page shows backend outage and clears password after unsuccessful login', a
   page.setState({ loginEmail: 'maya@example.com', loginPassword: 'secret' });
   await page.signIn({ preventDefault() {} });
   assert.equal(page.state.route, 'login');
-  assert.match(page.state.loginError, /Cannot reach the backend/);
+  assert.match(page.state.loginError, /could not connect/);
   assert.equal(page.state.loginPassword, '');
   assert.equal(page.state.loginBusy, false);
 });
@@ -215,4 +215,109 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   assert.equal(page.state.route, 'login');
   assert.equal(page.state.projects.length, 0);
   await assert.rejects(page.api.me(), { code: 'UNAUTHENTICATED' });
+});
+
+test('redesigned workflow preserves preview selection and the chosen render resolution', async t => {
+  const calls = [];
+  const page = component({ ...S, createApi: () => ({
+    renderClip: async (id, body) => { calls.push({ id, body }); return { filename: 'short.mp4', url: '/media/short', downloadUrl: '/media/download', resolution: body.resolution }; },
+    getClips: async () => ({ clips: [], goal: 'educational' }), getProjectPlayback: async () => ({ url: '/media/source' }), getProjectDownloads: async () => [],
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, projectId: 'p1', clipsRes: { clips: [{ id: 'c1', rank: 1, start: 4, end: 24, duration: 20, hook: 'A clear hook', scores: { hook: 90, value: 80, standalone: 85, visual: 70 } }] } });
+  page.renderVals().clips[0].preview();
+  assert.equal(page.state.route, 'editor');
+  assert.equal(page.state.previewId, 'c1');
+  page.renderVals().appProps.v.setResolution(720);
+  await page.renderVals().appProps.v.renderPreview();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.resolution, 720);
+  assert.equal(page.state.route, 'result');
+  assert.equal(page.state.result.downloadUrl, 'http://api.test/media/download');
+  assert.equal(page.state.result.hook, 'A clear hook');
+  assert.equal(page.state.renderingId, null);
+});
+
+test('render failure keeps the editing workspace and offers a readable error', async t => {
+  const page = component({ ...S, createApi: () => ({ renderClip: async () => { throw new Error('Source expired. Upload your video again.'); } }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ route: 'editor', me: session, projectId: 'p1' });
+  await page.renderClip('c1');
+  assert.equal(page.state.route, 'editor');
+  assert.match(page.state.renderError, /Upload your video again/);
+  assert.equal(page.state.renderingId, null);
+});
+
+test('URL creation requires rights confirmation, and upload probing prevents submission', t => {
+  const page = component(S);
+  t.after(() => page.componentWillUnmount());
+  page.setState({ me: session });
+  page.setNp({ tab: 'url', url: 'https://youtube.com/watch?v=example' });
+  assert.equal(page.renderVals().cannotStart, true);
+  page.setNp({ rights: true });
+  assert.equal(page.renderVals().cannotStart, false);
+  page.setNp({ probing: true });
+  assert.equal(page.renderVals().cannotStart, true);
+});
+
+test('signing out removes rendered media and usage from the redesigned workspace', t => {
+  const page = component(S);
+  t.after(() => page.componentWillUnmount());
+  page.setState({ me: session, renderedClips: [{ url: 'https://private.test/video' }], result: { url: 'https://private.test/video' }, usageEntries: [{ projectId: 'private' }], renderError: 'private title' });
+  page.resetSession();
+  assert.equal(page.state.renderedClips.length, 0);
+  assert.equal(page.state.result, null);
+  assert.equal(page.state.usageEntries.length, 0);
+  assert.equal(page.state.renderError, null);
+});
+
+test('usage activity converts ledger seconds without inventing minutes', t => {
+  const page = component(S);
+  t.after(() => page.componentWillUnmount());
+  page.setState({ me: session, usageEntries: [{ processedSeconds: 150, adjustmentSeconds: -30, createdAt: Date.now() }] });
+  assert.equal(page.renderVals().appProps.v.usageEntries[0].minutes, '2 min');
+});
+
+test('late suggestions from another project cannot replace the current project', async t => {
+  let resolve;
+  const page = component({ ...S, createApi: () => ({ getClips: () => new Promise(r => { resolve = r; }), getProjectPlayback: async () => null, getProjectDownloads: async () => [] }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, projectId: 'old' });
+  const request = page.loadClips('old');
+  page.setState({ projectId: 'new' });
+  resolve({ clips: [{ id: 'old-clip' }] });
+  await request;
+  assert.equal(page.state.clipsRes, null);
+});
+
+test('returning to transcript editing preserves unsaved corrections', t => {
+  const page = component(S);
+  t.after(() => page.componentWillUnmount());
+  page.setState({ projectId: 'p1', transcript: { revision: 1, segments: [{ id: 's1', text: 'Original', start: 0, words: [] }] }, drafts: { s1: 'Corrected name' } });
+  page.loadTranscript = () => { throw new Error('Must not discard an existing draft'); };
+  page.renderVals().goTranscript();
+  assert.equal(page.state.route, 'transcript');
+  assert.equal(page.renderVals().segments[0].text, 'Corrected name');
+  assert.equal(page.renderVals().notDirty, false);
+});
+
+test('a finished render does not pull the user away from another screen', async t => {
+  let finish;
+  const page = component({ ...S, createApi: () => ({
+    renderClip: () => new Promise(resolve => { finish = resolve; }),
+    getClips: async () => ({ clips: [] }), getProjectPlayback: async () => null, getProjectDownloads: async () => [],
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ route: 'editor', projectId: 'p1', previewId: 'c1', me: session });
+  const rendering = page.renderClip('c1');
+  page.setState({ route: 'settings' });
+  finish({ url: '/media/render.mp4' });
+  await rendering;
+  assert.equal(page.state.route, 'settings');
+  assert.equal(page.state.result.url, 'http://api.test/media/render.mp4');
+  assert.match(page.state.toast, /Short is ready/);
 });
