@@ -353,7 +353,8 @@ paths:
       operationId: renderClip
       summary: Render a suggested clip to vertical MP4
       description: Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg cuts
-        the selected continuous source interval, center-crops it to 9:16, and saves the MP4 under MEDIA_DIR/renders.
+        the selected continuous source interval, fits the whole frame into a 9:16 canvas while preserving its
+        aspect ratio, adds black padding where needed, and saves the MP4 under MEDIA_DIR/renders.
       parameters:
       - name: id
         in: path

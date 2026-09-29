@@ -38,7 +38,13 @@ def render_short(
     executable = ffmpeg_path(configured_ffmpeg)
     height = 1920 if resolution == 1080 else 1280
     width = 1080 if resolution == 1080 else 720
-    vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"
+    # Fit the full display aspect ratio (including non-square source pixels), then
+    # center it on the fixed export canvas. Even dimensions keep H.264 compatible.
+    vf = (
+        f"scale=w='trunc(min({width},{height}*dar)/2)*2':"
+        f"h='trunc(min({height},{width}/dar)/2)*2',setsar=1,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"
+    )
     command = [
         executable,
         "-hide_banner",
