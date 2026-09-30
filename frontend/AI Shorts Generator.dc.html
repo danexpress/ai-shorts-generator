@@ -10,6 +10,7 @@
 <script src="./config.js"></script>
 <script src="./services.js"></script>
 <script src="./tests.js"></script>
+<script src="./social-ui.js"></script>
 <script src="./components.js"></script>
 <script src="./support.js"></script>
 </head>
@@ -37,6 +38,7 @@ class Component extends DCLogic {
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
     renderedClips: [], renderingId: null, resolution: 1080, result: null, renderError: null,
+    social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
     theme: 'system', dashboardLoading: false, dashboardError: null, clipsError: null,
     transcriptError: null, savingTranscript: false, usageLoading: false, usageError: null, usageEntries: [],
     np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
@@ -46,6 +48,13 @@ class Component extends DCLogic {
 
   componentDidMount() {
     this.disposed = false;
+    this.socialListener = event => {
+      if (!this.socialPopup || event.source !== this.socialPopup || event.origin !== new URL(window.SHORTS_CONFIG.apiBaseUrl || window.location.origin).origin || event.data?.type !== 'shorts-social-connection') return;
+      this.socialPopup = null;
+      this.setState(s => ({ social: { ...s.social, busy: false, error: event.data.ok ? null : 'The connection was not completed. Try connecting again.' } }));
+      this.loadSocialAccounts();
+    };
+    window.addEventListener?.('message', this.socialListener);
     try { this.setTheme(window.localStorage.getItem('shorts-theme') || 'system'); } catch (_) {}
     const boot = () => {
       if (!window.ShortsServices) return void (this.bootTimer = setTimeout(boot, 50));
@@ -58,7 +67,7 @@ class Component extends DCLogic {
     };
     return boot();
   }
-  componentWillUnmount() { this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
 
   async restoreSession() {
     const request = this.sessionRequest = (this.sessionRequest || 0) + 1;
@@ -102,6 +111,7 @@ class Component extends DCLogic {
     this.stopPolling();
     this.releasePreviewUrls();
     this.setState({ route: 'login', bootError: null, me: null, loginPassword: '', loginError: message,
+      social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
       renderedClips: [], renderingId: null, result: null, renderError: null, usageEntries: [],
@@ -164,6 +174,34 @@ class Component extends DCLogic {
     this.setState({ route, previewId: null });
     if (route === 'dashboard' || route === 'projects') this.loadDashboard();
     if (route === 'usage') this.loadUsage();
+    if (route === 'socialAccounts') this.loadSocialAccounts();
+  }
+  async loadSocialAccounts() {
+    const epoch = this.sessionRequest;
+    this.setState(s => ({social: {...s.social, loading: true}}));
+    try { const data = await this.api.listSocialAccounts(); if (epoch !== this.sessionRequest || this.disposed) return; this.setState(s => ({social: {...s.social, ...data, loading: false}})); }
+    catch(e) { if (epoch === this.sessionRequest && !this.handleAuth(e)) this.setState(s => ({social: {...s.social, loading: false, error: e.message}})); }
+  }
+  async connectSocial(platform) {
+    if (this.state.social.busy) return;
+    const popup = window.open('about:blank', 'shorts-social-connect', 'width=600,height=750');
+    if (!popup) return this.setState(s => ({social: {...s.social, error: 'Allow popups for this site, then try connecting again.'}}));
+    this.socialPopup = popup;
+    this.setState(s => ({social: {...s.social, busy: true, error: null}}));
+    try {
+      const result = await this.api.connectSocialAccount(platform);
+      if (!this.state.me || this.disposed) { popup.close(); return; }
+      popup.location.href = result.authorization_url;
+      clearInterval(this.socialPopupTimer);
+      this.socialPopupTimer = setInterval(() => { if (popup.closed) { clearInterval(this.socialPopupTimer); this.socialPopup = null; this.setState(s => ({social: {...s.social, busy: false}})); this.loadSocialAccounts(); } }, 1000);
+    } catch(e) { popup.close(); this.socialPopup = null; if (!this.handleAuth(e)) this.setState(s => ({social: {...s.social, busy: false, error: e.message}})); }
+  }
+  async disconnectSocial(platform) {
+    if (this.state.social.busy) return;
+    this.setState(s => ({social: {...s.social, busy: true, error: null}}));
+    try { await this.api.disconnectSocialAccount(platform); await this.loadSocialAccounts(); }
+    catch(e) { if (!this.handleAuth(e)) this.setState(s => ({social: {...s.social, error: e.message}})); }
+    finally { this.setState(s => ({social: {...s.social, busy: false}})); }
   }
   async loadUsage() {
     this.setState({ usageLoading: true, usageError: null });
@@ -563,8 +601,9 @@ class Component extends DCLogic {
       testSummary: tr.length ? (tr.length - failed) + ' passed · ' + failed + ' failed · ' + tr.length + ' of ' + total + ' run' : total + ' tests against the mock backend and HTTP client. Each test builds its own isolated backend with a fake clock.',
       toast: s.toast,
     };
-    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings' };
+    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts' };
     Object.assign(values, {
+      social: s.social, loadSocialAccounts: () => this.loadSocialAccounts(), connectSocial: platform => this.connectSocial(platform), disconnectSocial: platform => this.disconnectSocial(platform),
       bootError: s.bootError, restoreSession: () => this.restoreSession(), showLogin: () => this.resetSession(),
       route: s.route, pageLabel: labels[s.route], theme: s.theme, email: me?.user.email || '',
       initials: (me?.user.displayName || '').split(' ').map(part => part[0]).slice(0, 2).join(''),

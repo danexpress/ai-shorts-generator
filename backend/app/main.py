@@ -15,7 +15,12 @@ from .database import Database
 from .db_models import DatabaseState, UserRecord
 from .errors import ApiError
 from .models import ErrorResponse
-from .routers import analysis, auth, media, projects, renders, transcripts, uploads, usage
+from .routers import analysis, auth, media, projects, renders, social, transcripts, uploads, usage
+from .social.accounts import AccountService
+from .social.adapters import publishers
+from .social.config import SocialSettings
+from .social.http import ProviderHTTP
+from .social.security import RedactOAuthQueries
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,8 @@ def create_app(
     database: Database | None = None,
     settings: Settings | None = None,
     clock: Callable[[], float] = time.time,
+    social_settings: SocialSettings | None = None,
+    social_adapters: dict | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     owns_database = database is None
@@ -42,6 +49,7 @@ def create_app(
                     marker.demoSeeded = True
             yield
         finally:
+            app.state.social_http.close()
             if owns_database:
                 database.dispose()
 
@@ -59,6 +67,17 @@ def create_app(
             "default": {"model": ErrorResponse, "description": "Stable API error envelope."},
         },
     )
+    social_settings = social_settings or SocialSettings()
+    app.state.social_http = ProviderHTTP()
+    app.state.social_accounts = AccountService(
+        database,
+        social_settings,
+        clock,
+        social_adapters
+        if social_adapters is not None
+        else publishers(social_settings, app.state.social_http),
+    )
+    app.add_middleware(RedactOAuthQueries)
     app.state.database = database
     app.state.settings = settings
     app.state.clock = clock
@@ -127,6 +146,7 @@ def create_app(
         transcripts.router,
         analysis.router,
         usage.router,
+        social.router,
     ):
         app.include_router(router)
     return app

@@ -72,6 +72,9 @@
 
   // [method, HTTP verb, path]. {id} = first positional argument.
   const ENDPOINTS = [
+    ['listSocialAccounts', 'GET', '/v1/social-accounts'],
+    ['connectSocialAccount', 'GET', '/v1/social-accounts/{id}/connect'],
+    ['disconnectSocialAccount', 'DELETE', '/v1/social-accounts/{id}'],
     ['signIn', 'POST', '/v1/auth/google'],
     ['signOut', 'POST', '/v1/auth/logout'],
     ['me', 'GET', '/v1/me'],
@@ -773,6 +776,9 @@
         return { ...usageView(u), entries: db.ledger.filter((e) => e.userId === u.id && e.createdAt >= monthStart()) };
       }),
     };
+
+    api.listSocialAccounts = () => op(() => { requireUser(); return {accounts: [], platforms: ['youtube','tiktok','x'].map(platform => ({platform, enabled: false, notice: 'Social publishing needs a configured backend.', private_only: false})), copy_available: false}; });
+    api.connectSocialAccount = api.disconnectSocialAccount = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
     // Test/demo hooks — deliberately outside the API contract.
     Object.defineProperty(api, '_mock', {

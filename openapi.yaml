@@ -1,8 +1,7 @@
-# Frontend-derived contract with password/bearer authentication and SQLAlchemy persistence.
 openapi: 3.0.3
 info:
   title: AI Shorts Generator — frontend API contract
-  version: 1.3.0
+  version: 1.4.0
   description: 'Contract for the frontend API, with password/bearer authentication and local media playback.
 
 
@@ -22,13 +21,13 @@ info:
     the bearer token in memory and attaches it to subsequent requests. Refreshing the page requires sign-in again.
 
 
-    The SQLAlchemy backend persists application data and uploaded source files across restarts. Source media is stored
-    below MEDIA_DIR/sources using opaque filenames and is streamed with byte-range support through short-lived signed
-    playback links. Selected suggestions can be rendered with FFmpeg into vertical H.264/AAC MP4 files under
-    MEDIA_DIR/renders (backend/media/renders by default). Rendered files are retained for seven days, listed in project
-    downloads, and available through signed preview/download URLs. Processing/transcripts/suggestions remain demo
-    content; YouTube import is disabled by default and downloads rights-confirmed videos when enabled. There is no real transcription, LLM or
-    object-storage integration.'
+    The SQLAlchemy backend persists application data and uploaded source files across restarts. Source media is
+    stored below MEDIA_DIR/sources using opaque filenames and is streamed with byte-range support through short-lived
+    signed playback links. Selected suggestions can be rendered with FFmpeg into vertical H.264/AAC MP4 files under
+    MEDIA_DIR/renders (backend/media/renders by default). Rendered files are retained for seven days, listed in
+    project downloads, and available through signed preview/download URLs. Processing/transcripts/suggestions remain
+    demo content; YouTube import is disabled by default and downloads rights-confirmed videos when enabled. There
+    is no real transcription, LLM or object-storage integration.'
 servers:
 - url: /
   description: Same origin by default; createHttpApi can configure a baseUrl.
@@ -213,8 +212,8 @@ paths:
       operationId: createYoutubeProject
       summary: Import a supported YouTube video
       description: Requires YOUTUBE_IMPORT=true and explicit rights confirmation. Downloads one YouTube video to
-        private local source storage before returning a source-ready project. Supports watch and short-link URLs only;
-        playlists are ignored. Enforces a 30-second to 3-hour duration and 4-GiB file size limit. Call processProject
+        private local source storage before returning a source-ready project. Supports watch and short-link URLs
+        only; playlists are ignored. Enforces a 30-second to 3-hour duration and 4-GiB file size limit. Call processProject
         separately after a successful download.
       requestBody:
         required: true
@@ -352,8 +351,8 @@ paths:
     post:
       operationId: renderClip
       summary: Render a suggested clip to vertical MP4
-      description: Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg cuts
-        the selected continuous source interval, fits the whole frame into a 9:16 canvas while preserving its
+      description: Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg
+        cuts the selected continuous source interval, fits the whole frame into a 9:16 canvas while preserving its
         aspect ratio, adds black padding where needed, and saves the MP4 under MEDIA_DIR/renders.
       parameters:
       - name: id
@@ -835,6 +834,146 @@ paths:
           $ref: '#/components/responses/Error403'
         '500':
           $ref: '#/components/responses/Error500'
+  /v1/social-accounts:
+    get:
+      tags:
+      - Social publishing
+      summary: List Accounts
+      operationId: listSocialAccounts
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialAccountsView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/social-accounts/{platform}/connect:
+    get:
+      tags:
+      - Social publishing
+      summary: Connect
+      operationId: connectSocialAccount
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: platform
+        in: path
+        required: true
+        schema:
+          enum:
+          - youtube
+          - tiktok
+          - x
+          type: string
+          title: Platform
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialConnectView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/social-accounts/{platform}/callback:
+    get:
+      tags:
+      - Social publishing
+      summary: Callback
+      operationId: socialOAuthCallback
+      parameters:
+      - name: platform
+        in: path
+        required: true
+        schema:
+          enum:
+          - youtube
+          - tiktok
+          - x
+          type: string
+          title: Platform
+      responses:
+        '200':
+          description: Connection result. Provider credentials are never returned.
+          content:
+            text/html:
+              schema:
+                type: string
+        '422':
+          description: Invalid request fields.
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security: []
+  /v1/social-accounts/{platform}:
+    delete:
+      tags:
+      - Social publishing
+      summary: Disconnect
+      operationId: disconnectSocialAccount
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: platform
+        in: path
+        required: true
+        schema:
+          enum:
+          - youtube
+          - tiktok
+          - x
+          type: string
+          title: Platform
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialDisconnected'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -948,8 +1087,8 @@ components:
           minimum: 0
           nullable: true
           description: Null when the creator has no monthly processing limit.
-      description: Calendar-month usage. A null limit and remaining balance mean no monthly cap.
-        Default limit is 60 minutes.
+      description: Calendar-month usage. A null limit and remaining balance mean no monthly cap. Default limit is
+        60 minutes.
     LedgerEntry:
       type: object
       required:
@@ -1288,7 +1427,8 @@ components:
         url:
           type: string
           format: uri
-          description: HTTPS youtube.com, www.youtube.com or m.youtube.com /watch?v=ID, or youtu.be/ID. IDs must match [\w-]{6,15}.
+          description: HTTPS youtube.com, www.youtube.com or m.youtube.com /watch?v=ID, or youtu.be/ID. IDs must
+            match [\w-]{6,15}.
         rightsConfirmed:
           type: boolean
           enum:
@@ -1502,7 +1642,9 @@ components:
           type: string
         resolution:
           type: integer
-          enum: [720, 1080]
+          enum:
+          - 720
+          - 1080
         durationSec:
           type: number
         bytes:
@@ -1724,6 +1866,145 @@ components:
             type: integer
             minimum: 1
             description: Token lifetime in seconds.
+    ErrorDetail:
+      properties:
+        code:
+          type: string
+          title: Code
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - code
+      - message
+      title: ErrorDetail
+    ErrorResponse:
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+      type: object
+      required:
+      - error
+      title: ErrorResponse
+    SegmentEdit:
+      properties:
+        id:
+          type: string
+          title: Id
+        text:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Text
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - text
+      title: SegmentEdit
+    SocialAccountView:
+      properties:
+        id:
+          type: string
+          title: Id
+        platform:
+          type: string
+          enum:
+          - youtube
+          - tiktok
+          - x
+          title: Platform
+        account_name:
+          type: string
+          title: Account Name
+        username:
+          title: Username
+          type: string
+          nullable: true
+        avatar_url:
+          title: Avatar Url
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - connected
+          - reconnect_required
+          title: Status
+      type: object
+      required:
+      - id
+      - platform
+      - account_name
+      - username
+      - avatar_url
+      - status
+      title: SocialAccountView
+    SocialAccountsView:
+      properties:
+        accounts:
+          items:
+            $ref: '#/components/schemas/SocialAccountView'
+          type: array
+          title: Accounts
+        platforms:
+          items:
+            $ref: '#/components/schemas/SocialCapability'
+          type: array
+          title: Platforms
+        copy_available:
+          type: boolean
+          title: Copy Available
+      type: object
+      required:
+      - accounts
+      - platforms
+      - copy_available
+      title: SocialAccountsView
+    SocialCapability:
+      properties:
+        platform:
+          type: string
+          enum:
+          - youtube
+          - tiktok
+          - x
+          title: Platform
+        enabled:
+          type: boolean
+          title: Enabled
+        notice:
+          title: Notice
+          type: string
+          nullable: true
+        private_only:
+          type: boolean
+          title: Private Only
+          default: false
+      type: object
+      required:
+      - platform
+      - enabled
+      - notice
+      title: SocialCapability
+    SocialConnectView:
+      properties:
+        authorization_url:
+          type: string
+          title: Authorization Url
+      type: object
+      required:
+      - authorization_url
+      title: SocialConnectView
+    SocialDisconnected:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+      type: object
+      title: SocialDisconnected
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.
@@ -1775,8 +2056,8 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Error422:
-      description: INVALID_INPUT, DOWNLOAD_FAILED, SOURCE_TOO_LONG, SOURCE_TOO_SHORT, SOURCE_TOO_LARGE, MEDIA_PROBE_FAILED, UNSUPPORTED_URL or RIGHTS_NOT_CONFIRMED
-        — request validation failed.
+      description: INVALID_INPUT, DOWNLOAD_FAILED, SOURCE_TOO_LONG, SOURCE_TOO_SHORT, SOURCE_TOO_LARGE, MEDIA_PROBE_FAILED,
+        UNSUPPORTED_URL or RIGHTS_NOT_CONFIRMED — request validation failed.
       content:
         application/json:
           schema:

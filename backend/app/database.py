@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from .db_models import Base, DatabaseState
+from .social import db_models as social_models  # noqa: F401
 
 
 class Database:

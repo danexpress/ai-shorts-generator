@@ -1985,6 +1985,25 @@
         ),
       ),
       h(
+        "section",
+        { className: "panel pad mt-5 row between" },
+        h(
+          "div",
+          null,
+          h("h2", null, "Social Accounts"),
+          h(
+            "p",
+            { className: "muted small" },
+            "Connect YouTube, TikTok, and X to publish your Shorts.",
+          ),
+        ),
+        h(
+          Button,
+          { onClick: () => v.navigate("socialAccounts") },
+          "Manage connections",
+        ),
+      ),
+      h(
         "details",
         { className: "advanced-settings mt-5" },
         h("summary", null, "Advanced"),
@@ -2208,6 +2227,7 @@
       transcript: Transcript,
       usage: Usage,
       settings: Settings,
+      socialAccounts: root.ShortsSocialUI.SocialAccounts,
     };
     return h(
       "div",
