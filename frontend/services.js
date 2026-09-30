@@ -175,12 +175,34 @@
 
   /* ---------- HTTP implementation ---------- */
 
-  function createHttpApi({ baseUrl = '', fetch: f, headers = {} } = {}) {
+  function createHttpApi({ baseUrl = '', fetch: f, headers = {}, storage } = {}) {
     const doFetch = f || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
     const origin = baseUrl.replace(/\/+$/, '');
-    // Tokens stay in memory. Refreshing the page requires signing in again.
+    // Keep only the expiring bearer token in this browser tab, scoped to the API.
+    // Storage can be unavailable (private browsing/policy); memory-only login still works.
+    if (storage === undefined) {
+      try { storage = typeof window !== 'undefined' ? window.sessionStorage : null; }
+      catch (_) { storage = null; }
+    }
+    const sessionKey = 'shorts-session:' + (origin || 'same-origin');
     let accessToken = null;
+    let expiresAt = null;
     let sessionGeneration = 0;
+    const clearSession = () => {
+      accessToken = null;
+      expiresAt = null;
+      try { storage?.removeItem(sessionKey); } catch (_) {}
+    };
+    try {
+      const saved = storage?.getItem(sessionKey);
+      if (saved) {
+        const session = JSON.parse(saved);
+        if (typeof session.accessToken === 'string' && session.accessToken && Number.isFinite(session.expiresAt) && session.expiresAt > Date.now()) {
+          accessToken = session.accessToken;
+          expiresAt = session.expiresAt;
+        } else clearSession();
+      }
+    } catch (_) { clearSession(); }
     const api = {};
     for (const [name, verb, path] of ENDPOINTS) {
       const hasId = path.includes('{id}');
@@ -189,12 +211,13 @@
         const body = args[0];
         const opts = args[1] || {};
         const url = origin + (hasId ? path.replace('{id}', encodeURIComponent(id)) : path);
+        if (expiresAt !== null && expiresAt <= Date.now()) { sessionGeneration++; clearSession(); }
         if (name === 'signIn' || name === 'signOut') sessionGeneration++;
         const requestGeneration = sessionGeneration;
-        if (name === 'signIn') accessToken = null;
+        if (name === 'signIn') clearSession();
         const h = { Accept: 'application/json', ...headers };
         if (accessToken) h.Authorization = 'Bearer ' + accessToken;
-        if (name === 'signOut') accessToken = null;
+        if (name === 'signOut') clearSession();
         const sendBody = body !== undefined && verb !== 'GET';
         if (name === 'uploadMedia') h['Content-Type'] = body.type || 'application/octet-stream';
         else if (sendBody) h['Content-Type'] = 'application/json';
@@ -217,7 +240,7 @@
             const err = (data && data.error) || {};
             const fallback = res.status === 401 ? 'UNAUTHENTICATED' : res.status === 404 ? 'NOT_FOUND' : res.status >= 500 ? 'SERVER_ERROR' : 'INVALID_INPUT';
             const code = err.code || fallback;
-            if (['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED'].includes(code)) accessToken = null;
+            if (['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED'].includes(code)) { sessionGeneration++; clearSession(); }
             throw new ApiError(code, err.message, res.status);
           }
           if (name === 'signIn') {
@@ -225,11 +248,15 @@
               throw new ApiError('SERVER_ERROR', 'The server did not return a sign-in token.', 502);
             }
             accessToken = data.access_token;
+            if (Number.isFinite(data.expires_in) && data.expires_in > 0) {
+              expiresAt = Date.now() + data.expires_in * 1000;
+              try { storage?.setItem(sessionKey, JSON.stringify({ accessToken, expiresAt })); } catch (_) {}
+            }
           }
           return data;
         } finally {
           // A disconnected server must not leave the browser signed in locally.
-          if (name === 'signOut' && requestGeneration === sessionGeneration) accessToken = null;
+          if (name === 'signOut' && requestGeneration === sessionGeneration) clearSession();
         }
       };
     }

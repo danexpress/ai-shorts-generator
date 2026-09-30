@@ -10,6 +10,121 @@ const S = require('./services.js');
 const response = (data, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
 const session = { user: { displayName: 'Maya', email: 'maya@example.com' }, usage: { usedMinutes: 19, limitMinutes: 60, remainingMinutes: 41 }, features: { youtubeImport: false }, activeJob: null };
 
+function memoryStorage() {
+  const items = new Map();
+  return {
+    items,
+    getItem: key => items.get(key) ?? null,
+    setItem: (key, value) => items.set(key, String(value)),
+    removeItem: key => items.delete(key),
+  };
+}
+
+test('refresh restores only the expiring token and scopes it to the backend URL', async () => {
+  const storage = memoryStorage();
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url, ...init });
+    return response(url.endsWith('/google') ? { ...session, access_token: 'saved-token', expires_in: 3600 } : session);
+  };
+  const original = S.createHttpApi({ baseUrl: 'http://api.test/', storage, fetch });
+  await original.signIn({ email: 'maya@example.com', password: 'secret' });
+  assert.equal(storage.items.size, 1);
+  const saved = JSON.parse([...storage.items.values()][0]);
+  assert.deepEqual(Object.keys(saved).sort(), ['accessToken', 'expiresAt']);
+  assert.equal(saved.accessToken, 'saved-token');
+  assert.ok(saved.expiresAt > Date.now());
+  const reloaded = S.createHttpApi({ baseUrl: 'http://api.test', storage, fetch });
+  await reloaded.me();
+  assert.equal(calls.at(-1).headers.Authorization, 'Bearer saved-token');
+  const otherBackend = S.createHttpApi({ baseUrl: 'http://other-api.test', storage, fetch });
+  await otherBackend.me();
+  assert.equal(calls.at(-1).headers.Authorization, undefined);
+});
+
+test('logout removes the stored token before the network finishes, even when offline', async () => {
+  const storage = memoryStorage();
+  let rejectLogout;
+  let lastHeaders;
+  const fetch = async (url, init) => {
+    lastHeaders = init.headers;
+    if (url.endsWith('/google')) return response({ access_token: 'token', expires_in: 3600 });
+    if (url.endsWith('/logout')) return new Promise((resolve, reject) => { rejectLogout = reject; });
+    return response(session);
+  };
+  const api = S.createHttpApi({ storage, fetch });
+  await api.signIn({ email: 'maya@example.com', password: 'secret' });
+  const pending = api.signOut();
+  assert.equal(lastHeaders.Authorization, 'Bearer token');
+  assert.equal(storage.items.size, 0);
+  const reloaded = S.createHttpApi({ storage, fetch });
+  await reloaded.me();
+  assert.equal(lastHeaders.Authorization, undefined);
+  rejectLogout(new Error('offline'));
+  await assert.rejects(pending, { code: 'NETWORK_ERROR' });
+  assert.equal(storage.items.size, 0);
+});
+
+for (const saved of ['{invalid json', 'null', JSON.stringify({ accessToken: 'old-token', expiresAt: Date.now() - 1000 }), JSON.stringify({ accessToken: 'token' })]) {
+  test(`refresh discards an invalid or expired saved session: ${saved}`, async () => {
+    const storage = memoryStorage();
+    storage.setItem('shorts-session:same-origin', saved);
+    let headers;
+    const api = S.createHttpApi({ storage, fetch: async (url, init) => { headers = init.headers; return response(session); } });
+    await api.me();
+    assert.equal(headers.Authorization, undefined);
+    assert.equal(storage.items.size, 0);
+  });
+}
+
+test('blocked browser storage still allows login and authenticated requests in memory', async () => {
+  const storage = Object.fromEntries(['getItem', 'setItem', 'removeItem'].map(name => [name, () => { throw new Error('Storage blocked'); }]));
+  let headers;
+  const api = S.createHttpApi({ storage, fetch: async (url, init) => {
+    headers = init.headers;
+    return response(url.endsWith('/google') ? { access_token: 'token', expires_in: 3600 } : session);
+  }});
+  await api.signIn({ email: 'maya@example.com', password: 'secret' });
+  await api.me();
+  assert.equal(headers.Authorization, 'Bearer token');
+  await api.signOut();
+  await api.me();
+  assert.equal(headers.Authorization, undefined);
+});
+
+test('a temporary network failure preserves the stored session for retry', async () => {
+  const storage = memoryStorage();
+  let offline = false;
+  let headers;
+  const fetch = async (url, init) => {
+    headers = init.headers;
+    if (offline) throw new Error('offline');
+    return response(url.endsWith('/google') ? { access_token: 'token', expires_in: 3600 } : session);
+  };
+  await S.createHttpApi({ storage, fetch }).signIn({ email: 'maya@example.com', password: 'secret' });
+  const reloaded = S.createHttpApi({ storage, fetch });
+  offline = true;
+  await assert.rejects(reloaded.me(), { code: 'NETWORK_ERROR' });
+  assert.equal(storage.items.size, 1);
+  offline = false;
+  await reloaded.me();
+  assert.equal(headers.Authorization, 'Bearer token');
+});
+
+test('a delayed login cannot recreate a stored session after logout', async () => {
+  const storage = memoryStorage();
+  let resolveLogin;
+  const api = S.createHttpApi({ storage, fetch: async url => {
+    if (url.endsWith('/google')) return new Promise(resolve => { resolveLogin = resolve; });
+    return response({ ok: true });
+  }});
+  const pending = api.signIn({ email: 'maya@example.com', password: 'secret' });
+  await api.signOut();
+  resolveLogin(response({ access_token: 'late-token', expires_in: 3600 }));
+  await assert.rejects(pending, { code: 'SESSION_CHANGED' });
+  assert.equal(storage.items.size, 0);
+});
+
 test('HTTP login sends a password, attaches the token, and revokes it on logout', async () => {
   const calls = [];
   const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch: async (url, init) => {
@@ -50,16 +165,18 @@ test('HTTP sends video bytes and requests a project playback link with bearer au
 
 for (const code of ['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED']) {
   test(`HTTP ${code} clears the token`, async () => {
+    const storage = memoryStorage();
     let fail = false;
     let lastHeaders;
-    const api = S.createHttpApi({ fetch: async (url, init) => {
+    const api = S.createHttpApi({ storage, fetch: async (url, init) => {
       lastHeaders = init.headers;
-      if (url.endsWith('/google')) return response({ access_token: 'token' });
+      if (url.endsWith('/google')) return response({ access_token: 'token', expires_in: 3600 });
       return fail ? response({ error: { code } }, code === 'UNAUTHENTICATED' ? 401 : 403) : response(session);
     }});
     await api.signIn({ email: 'maya@example.com', password: 'secret' });
     fail = true;
     await assert.rejects(api.me(), { code });
+    assert.equal(storage.items.size, 0);
     fail = false;
     await api.me();
     assert.equal(lastHeaders.Authorization, undefined);
@@ -108,6 +225,67 @@ function component(services, baseUrl = 'http://api.test', globals = {}) {
   const context = vm.createContext({ DCLogic, URL, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
   return vm.runInContext(script + '\nnew Component()', context);
 }
+
+test('startup validates the session and opens the dashboard without another login', async t => {
+  const page = component({ ...S, createApi: () => ({ me: async () => session, listProjects: async () => [{ id: 'p1', status: 'draft' }] }) });
+  t.after(() => page.componentWillUnmount());
+  assert.equal(page.state.route, 'boot');
+  await page.componentDidMount();
+  assert.equal(page.state.route, 'dashboard');
+  assert.equal(page.state.me.user.email, session.user.email);
+  assert.equal(page.state.projects[0].id, 'p1');
+});
+
+test('startup without a valid session shows a clean login screen', async t => {
+  const page = component({ ...S, createApi: () => ({ me: async () => { throw new S.ApiError('UNAUTHENTICATED'); } }) });
+  t.after(() => page.componentWillUnmount());
+  await page.componentDidMount();
+  assert.equal(page.state.route, 'login');
+  assert.equal(page.state.me, null);
+  assert.equal(page.state.loginError, null);
+});
+
+test('session restoration offers a retry on connection failure and then restores the dashboard', async t => {
+  let offline = true;
+  const page = component({ ...S, createApi: () => ({
+    me: async () => { if (offline) throw new S.ApiError('NETWORK_ERROR'); return session; },
+    listProjects: async () => [],
+  }) });
+  t.after(() => page.componentWillUnmount());
+  await page.componentDidMount();
+  assert.equal(page.state.route, 'boot');
+  assert.match(page.state.bootError, /connection.*try again/i);
+  assert.equal(page.state.me, null);
+  offline = false;
+  await page.renderVals().appProps.v.restoreSession();
+  assert.equal(page.state.route, 'dashboard');
+  assert.equal(page.state.bootError, null);
+});
+
+test('a disabled account cannot be restored', async t => {
+  const page = component({ ...S, createApi: () => ({ me: async () => { throw new S.ApiError('ACCOUNT_DISABLED'); } }) });
+  t.after(() => page.componentWillUnmount());
+  await page.componentDidMount();
+  assert.equal(page.state.route, 'login');
+  assert.equal(page.state.me, null);
+  assert.equal(page.state.loginError, S.ERROR_COPY.ACCOUNT_DISABLED);
+});
+
+test('a slow startup response cannot reopen the dashboard after logout', async t => {
+  let resolveMe;
+  const page = component({ ...S, createApi: () => ({
+    me: () => new Promise(resolve => { resolveMe = resolve; }),
+    signOut: async () => ({ ok: true }),
+  }) });
+  t.after(() => page.componentWillUnmount());
+  const boot = page.componentDidMount();
+  await page.signOut();
+  resolveMe(session);
+  await boot;
+  assert.equal(page.state.route, 'login');
+  assert.equal(page.state.me, null);
+  assert.equal(page.state.projects.length, 0);
+});
 
 test('page uses the HTTP client, password form state and server feature flags', async t => {
   const options = [];
@@ -185,13 +363,22 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
   });
-  const page = component(S, baseUrl);
+  const storage = memoryStorage();
+  const persistentServices = { ...S, createApi: config => S.createApi({ ...config, storage }) };
+  const page = component(persistentServices, baseUrl);
   t.after(() => page.componentWillUnmount());
-  page.componentDidMount();
+  await page.componentDidMount();
+  assert.equal(page.state.route, 'login');
   page.setState({ loginEmail: 'maya@example.com', loginPassword: 'DemoPass123!' });
   await page.signIn({ preventDefault() {} });
   assert.equal(page.state.route, 'dashboard');
   assert.ok(page.state.projects.some(p => p.status === 'ready'));
+  const reloadedPage = component(persistentServices, baseUrl);
+  t.after(() => reloadedPage.componentWillUnmount());
+  await reloadedPage.componentDidMount();
+  assert.equal(reloadedPage.state.route, 'dashboard');
+  assert.equal(reloadedPage.state.me.user.email, 'maya@example.com');
+  assert.ok(reloadedPage.state.projects.some(p => p.status === 'ready'));
   const ready = page.state.projects.find(p => p.status === 'ready');
   await page.openProject(ready);
   await page.loadTranscript(ready.id);
@@ -215,6 +402,13 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   assert.equal(page.state.route, 'login');
   assert.equal(page.state.projects.length, 0);
   await assert.rejects(page.api.me(), { code: 'UNAUTHENTICATED' });
+  await assert.rejects(reloadedPage.api.me(), { code: 'UNAUTHENTICATED' });
+  assert.equal(reloadedPage.state.route, 'login');
+  const afterLogout = component(persistentServices, baseUrl);
+  t.after(() => afterLogout.componentWillUnmount());
+  await afterLogout.componentDidMount();
+  assert.equal(afterLogout.state.route, 'login');
+  assert.equal(storage.items.size, 0);
 });
 
 test('redesigned workflow preserves preview selection and the chosen render resolution', async t => {

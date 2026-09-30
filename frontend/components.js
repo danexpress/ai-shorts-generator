@@ -2175,7 +2175,26 @@
         "main",
         { className: "narrow pad boot-screen" },
         h(Brand),
-        h("div", { className: "mt-6" }, h(Skeleton)),
+        h(
+          "div",
+          { className: "mt-6 stack" },
+          v.bootError
+            ? h(
+                root.React.Fragment,
+                null,
+                h(ErrorState, {
+                  title: "We couldn’t restore your session.",
+                  message: v.bootError,
+                  retry: v.restoreSession,
+                }),
+                h(
+                  Button,
+                  { ghost: true, onClick: v.showLogin },
+                  "Go to sign in",
+                ),
+              )
+            : h(Skeleton),
+        ),
       );
     if (v.isLogin) return h(Login, { v });
     const screens = {

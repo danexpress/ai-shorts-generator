@@ -64,6 +64,16 @@ fs.mkdirSync(output, { recursive: true });
       .waitFor();
     await page.getByRole("table").waitFor();
     await capture("dashboard");
+    await page.reload({ waitUntil: "networkidle" });
+    await page
+      .getByRole("heading", { name: "Dashboard", exact: true })
+      .waitFor();
+    await page.getByRole("table").waitFor();
+    assert.equal(
+      await page.getByLabel("Email address").count(),
+      0,
+      "Refresh keeps the creator signed in",
+    );
     await nav("Projects");
     await page.getByRole("searchbox").fill("does-not-exist");
     await page.getByRole("heading", { name: "No matching projects" }).waitFor();
@@ -326,9 +336,23 @@ fs.mkdirSync(output, { recursive: true });
     await page.getByLabel("Loading", { exact: true }).waitFor();
     await capture("loading-state");
     await page.getByRole("heading", { name: "No Shorts yet" }).waitFor();
+    await page.unroute("**/v1/projects");
+    await nav("Settings");
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await page.getByLabel("Email address").waitFor();
+    assert.equal(
+      await page.evaluate(() =>
+        Object.keys(sessionStorage).some((key) =>
+          key.startsWith("shorts-session:"),
+        ),
+      ),
+      false,
+    );
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByLabel("Email address").waitFor();
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: desktop/mobile/tablet, light/dark, upload → analysis → transcript → regeneration → preview → 720p render → download, URL consent, project search/delete, keyboard tabs/dialog.",
+      "PASS: login refresh/logout, desktop/mobile/tablet, light/dark, upload → analysis → transcript → regeneration → preview → 720p render → download, URL consent, project search/delete, keyboard tabs/dialog.",
     );
     console.log(`Screenshots: ${output}`);
   } finally {

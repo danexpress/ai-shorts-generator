@@ -48,7 +48,7 @@ curl -X POST http://127.0.0.1:8000/v1/auth/google \
 
 Send `Authorization: Bearer <access_token>` on protected requests. Random tokens are stored as SHA-256 digests, expire after one hour, and can be revoked using `POST /v1/auth/logout`. Token records and project access survive server restarts.
 
-The frontend already uses password sign-in and adds the bearer token automatically. Run `make run` and `make frontend` in separate repository-root terminals, then open <http://127.0.0.1:3000>. The frontend holds the token in memory; after a page refresh, sign in again. Edit `frontend/config.js` if the API uses a different port. CORS defaults to ports 3000 on localhost.
+The frontend uses password sign-in and adds the bearer token automatically. Run `make run` and `make frontend` in separate repository-root terminals, then open <http://127.0.0.1:3000>. It retains the expiring token in the tab's `sessionStorage` and restores login after refresh by validating it with `/v1/me`. Logout clears browser storage and revokes the server token. Sessions still expire after one hour. Edit `frontend/config.js` if the API uses a different port. CORS defaults to ports 3000 on localhost.
 
 ## Backend behavior
 

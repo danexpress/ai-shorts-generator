@@ -1,8 +1,10 @@
 # Shorts Studio frontend
 
-The existing static HTML application uses its React-backed DC runtime, with no build step. API calls and workflow state remain in `AI Shorts Generator.dc.html`; `services.js` is the unchanged HTTP client and mock test service. `support.js` is the existing generated runtime.
+The existing static HTML application uses its React-backed DC runtime, with no build step. API calls and workflow state remain in `AI Shorts Generator.dc.html`; `services.js` provides the HTTP client and mock test service. `support.js` is the existing generated runtime.
 
-Run `make run` and `make frontend` from the repository root in separate terminals. Open http://127.0.0.1:3000. Configure the API origin in `config.js`. Sessions stay in memory; refreshing requires signing in again. Demo credentials and backend feature flags are documented in `../backend/README.md`.
+Run `make run` and `make frontend` from the repository root in separate terminals. Open http://127.0.0.1:3000. Configure the API origin in `config.js`. Demo credentials and backend feature flags are documented in `../backend/README.md`.
+
+Login survives page refresh in the same tab. The HTTP client saves only the bearer token and its expiration in browser `sessionStorage`, scoped to the API URL; passwords and account data are not stored. On startup, the app validates the saved token with `/v1/me` before opening the dashboard. Sessions still expire after one hour. Logout and authentication errors clear the saved token; closing the tab ends browser session storage. A connection failure offers a retry without discarding a still-valid token. When browser storage is blocked, login works in memory for the current page.
 
 ## Presentation architecture
 
@@ -25,7 +27,7 @@ Source retention is 24 hours; rendered files are retained for 7 days; analysis f
 
 `make test-frontend` runs the service contract tests and Node tests, including a real isolated FastAPI integration. No browser dependency is required for those checks. `make test` runs the backend suite, including FFmpeg export verification.
 
-`browser-smoke.cjs` is an optional real Chrome/Playwright test. It checks login, project search, URL consent, file upload, status transitions, transcript corrections, regeneration, video playback, 720p rendering, downloading, themes, responsive layouts, keyboard navigation, project deletion, action placement, and empty/loading/error states. It requires an **isolated** seeded backend with YouTube import enabled and a 30–60 second test MP4. It creates a test project and deletes it on successful completion; failed runs may leave a test project in that isolated database.
+`browser-smoke.cjs` is an optional real Chrome/Playwright test. It checks login restoration after refresh, logout, project search, URL consent, file upload, status transitions, transcript corrections, regeneration, video playback, 720p rendering, downloading, themes, responsive layouts, keyboard navigation, project deletion, action placement, and empty/loading/error states. It requires an **isolated** seeded backend with YouTube import enabled and a 30–60 second test MP4. It creates a test project and deletes it on successful completion; failed runs may leave a test project in that isolated database.
 
 Example (install test tools outside the app):
 

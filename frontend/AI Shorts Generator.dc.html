@@ -32,7 +32,7 @@ const idem = () => 'idem_' + Math.random().toString(36).slice(2) + Date.now().to
 
 class Component extends DCLogic {
   state = {
-    route: 'boot', me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
+    route: 'boot', bootError: null, me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
     projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -45,19 +45,34 @@ class Component extends DCLogic {
   };
 
   componentDidMount() {
+    this.disposed = false;
     try { this.setTheme(window.localStorage.getItem('shorts-theme') || 'system'); } catch (_) {}
     const boot = () => {
       if (!window.ShortsServices) return void (this.bootTimer = setTimeout(boot, 50));
       this.api = window.ShortsServices.createApi({
         mode: 'http',
         baseUrl: window.SHORTS_CONFIG.apiBaseUrl,
-        onCall: (call) => { if (!call.ok && call.method !== 'signIn') this.handleAuth(call); },
+        onCall: (call) => { if (!call.ok && call.method !== 'signIn' && this.state.route !== 'boot') this.handleAuth(call); },
       });
-      this.setState({ route: 'login' });
+      return this.restoreSession();
     };
-    boot();
+    return boot();
   }
-  componentWillUnmount() { clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+  componentWillUnmount() { this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+
+  async restoreSession() {
+    const request = this.sessionRequest = (this.sessionRequest || 0) + 1;
+    this.setState({ route: 'boot', bootError: null });
+    try {
+      const me = await this.api.me();
+      if (request !== this.sessionRequest || this.disposed) return;
+      await this.enter(me);
+    } catch (error) {
+      if (request !== this.sessionRequest || this.disposed || error.code === 'SESSION_CHANGED') return;
+      if (error.code === 'UNAUTHENTICATED') this.resetSession();
+      else if (!this.handleAuth(error)) this.setState({ bootError: 'Check your connection and try again.' });
+    }
+  }
 
   releasePreviewUrls() {
     const urls = Object.values(this.state.previewUrls || {});
@@ -72,19 +87,21 @@ class Component extends DCLogic {
   async signIn(e) {
     e.preventDefault();
     if (this.state.loginBusy || !this.api) return;
+    this.sessionRequest = (this.sessionRequest || 0) + 1;
     this.setState({ loginBusy: true, loginError: null });
     try {
       const me = await this.api.signIn({ email: this.state.loginEmail.trim(), password: this.state.loginPassword });
       await this.enter(me);
     } catch (error) {
-      this.setState({ loginError: error.code === 'NETWORK_ERROR' ? 'We could not connect. Check your connection and try again in a moment.' : error.message });
+      this.setState({ route: 'login', loginError: error.code === 'NETWORK_ERROR' ? 'We could not connect. Check your connection and try again in a moment.' : error.message });
     } finally { this.setState({ loginBusy: false, loginPassword: '' }); }
   }
   resetSession(message = null) {
+    this.sessionRequest = (this.sessionRequest || 0) + 1;
     this.probeVersion = (this.probeVersion || 0) + 1;
     this.stopPolling();
     this.releasePreviewUrls();
-    this.setState({ route: 'login', me: null, loginPassword: '', loginError: message,
+    this.setState({ route: 'login', bootError: null, me: null, loginPassword: '', loginError: message,
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
       renderedClips: [], renderingId: null, result: null, renderError: null, usageEntries: [],
@@ -93,6 +110,7 @@ class Component extends DCLogic {
       regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null });
   }
   async signOut() {
+    this.sessionRequest = (this.sessionRequest || 0) + 1;
     this.stopPolling();
     let message = null;
     try { await this.api.signOut(); }
@@ -547,6 +565,7 @@ class Component extends DCLogic {
     };
     const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings' };
     Object.assign(values, {
+      bootError: s.bootError, restoreSession: () => this.restoreSession(), showLogin: () => this.resetSession(),
       route: s.route, pageLabel: labels[s.route], theme: s.theme, email: me?.user.email || '',
       initials: (me?.user.displayName || '').split(' ').map(part => part[0]).slice(0, 2).join(''),
       navigate: route => this.go(route), setTheme: theme => this.setTheme(theme),
