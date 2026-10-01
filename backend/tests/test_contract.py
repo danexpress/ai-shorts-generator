@@ -22,6 +22,8 @@ def json_schema(value):
         return value
     result = {k: json_schema(v) for k, v in value.items() if k != "nullable"}
     if value.get("nullable"):
+        if "type" not in result:
+            return {"anyOf": [result, {"type": "null"}]}
         result["type"] = [result["type"], "null"]
         if "enum" in result:
             result["enum"].append(None)

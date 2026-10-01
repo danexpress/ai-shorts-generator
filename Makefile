@@ -7,10 +7,11 @@ FRONTEND_PORT ?= 3000
 BACKEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))backend
 FRONTEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))frontend
 
-.PHONY: help install run frontend test test-frontend lint format
+.PHONY: help install run frontend test test-frontend lint format worker
 
 help:
 	@echo "make run      Start the backend with auto-reload (installs dependencies as needed)"
+	@echo "make worker   Run the social publishing worker (same environment as backend)"
 	@echo "make install  Install backend dependencies"
 	@echo "make frontend Serve the frontend at http://127.0.0.1:$(FRONTEND_PORT) (run in a second terminal)"
 	@echo "make test     Run backend tests"
@@ -18,6 +19,9 @@ help:
 	@echo "make lint     Check code style and formatting"
 	@echo "make format   Format backend code and tests"
 	@echo "Override server settings: make run HOST=127.0.0.1 PORT=8001"
+
+worker:
+	cd "$(BACKEND_DIR)" && $(UV) run --locked python -m app.social.worker
 
 install:
 	cd "$(BACKEND_DIR)" && $(UV) sync --locked

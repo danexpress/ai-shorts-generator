@@ -916,6 +916,24 @@ paths:
           - x
           type: string
           title: Platform
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Single-use OAuth state bound to the connecting browser.
+      - name: code
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Provider authorization code; exchanged only on the server.
+      - name: error
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Provider denial; no authorization code is required.
       responses:
         '200':
           description: Connection result. Provider credentials are never returned.
@@ -962,6 +980,337 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SocialDisconnected'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/renders/{id}/social-copy:
+    get:
+      tags:
+      - Social publishing
+      summary: Get Copy
+      operationId: getSocialCopy
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialCopyView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Social publishing
+      summary: Generate Copy
+      operationId: generateSocialCopy
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialGenerateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialCopyView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags:
+      - Social publishing
+      summary: Save Copy
+      operationId: saveSocialCopy
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialCopySave'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialCopyView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/renders/{id}/social-copy/regenerate:
+    post:
+      tags:
+      - Social publishing
+      summary: Regenerate Copy
+      operationId: regenerateSocialCopy
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialGenerateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialCopyView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/social-accounts/tiktok/creator-info:
+    get:
+      tags:
+      - Social publishing
+      summary: Tiktok Creator
+      operationId: getTikTokCreatorInfo
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialCreatorInfo'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/renders/{id}/publish:
+    post:
+      tags:
+      - Social publishing
+      summary: Publish
+      operationId: publishRender
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          title: Idempotency-Key
+          type: string
+          nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialPublishRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPublishBatchView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/publish-batches/{id}:
+    get:
+      tags:
+      - Social publishing
+      summary: Batch
+      operationId: getPublishBatch
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPublishBatchView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/publish-jobs/{id}/retry:
+    post:
+      tags:
+      - Social publishing
+      summary: Retry Publish
+      operationId: retryPublishJob
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPublishJobView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/renders/{id}/publishing-history:
+    get:
+      tags:
+      - Social publishing
+      summary: History
+      operationId: getPublishingHistory
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SocialPublishBatchView'
+                title: Response Getpublishinghistory
         '422':
           description: Invalid request fields.
           content:
@@ -2005,6 +2354,414 @@ components:
           default: true
       type: object
       title: SocialDisconnected
+    SocialCopyView:
+      properties:
+        copy:
+          additionalProperties:
+            anyOf:
+            - $ref: '#/components/schemas/YouTubeCopy'
+            - $ref: '#/components/schemas/TikTokCopy'
+            - $ref: '#/components/schemas/XCopy'
+          type: object
+          title: Copy
+        updated_at:
+          title: Updated At
+          type: integer
+          nullable: true
+        source_transcript:
+          title: Source Transcript
+          type: string
+          nullable: true
+        transcript_verified:
+          type: boolean
+          title: Transcript Verified
+          default: false
+      type: object
+      required:
+      - copy
+      title: SocialCopyView
+    SocialCreatorInfo:
+      properties:
+        account_name:
+          type: string
+          title: Account Name
+        username:
+          title: Username
+          type: string
+          nullable: true
+        avatar_url:
+          title: Avatar Url
+          type: string
+          nullable: true
+        privacy_options:
+          items:
+            type: string
+          type: array
+          title: Privacy Options
+        comment_disabled:
+          type: boolean
+          title: Comment Disabled
+        duet_disabled:
+          type: boolean
+          title: Duet Disabled
+        stitch_disabled:
+          type: boolean
+          title: Stitch Disabled
+        max_duration:
+          type: integer
+          title: Max Duration
+      type: object
+      required:
+      - account_name
+      - username
+      - avatar_url
+      - privacy_options
+      - comment_disabled
+      - duet_disabled
+      - stitch_disabled
+      - max_duration
+      title: SocialCreatorInfo
+    SocialGenerateRequest:
+      properties:
+        transcript_confirmed:
+          type: boolean
+          title: Transcript Confirmed
+          default: false
+        platforms:
+          items:
+            type: string
+            enum:
+            - youtube
+            - tiktok
+            - x
+          type: array
+          maxItems: 3
+          minItems: 1
+          title: Platforms
+      additionalProperties: false
+      type: object
+      title: SocialGenerateRequest
+    TikTokCopy:
+      properties:
+        caption:
+          type: string
+          maxLength: 2200
+          minLength: 1
+          title: Caption
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 5
+          title: Hashtags
+      additionalProperties: false
+      type: object
+      required:
+      - caption
+      - hashtags
+      title: TikTokCopy
+    XCopy:
+      properties:
+        text:
+          type: string
+          maxLength: 280
+          minLength: 1
+          title: Text
+      additionalProperties: false
+      type: object
+      required:
+      - text
+      title: XCopy
+    YouTubeCopy:
+      properties:
+        title:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Title
+        description:
+          type: string
+          maxLength: 4800
+          minLength: 1
+          title: Description
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 5
+          title: Hashtags
+      additionalProperties: false
+      type: object
+      required:
+      - title
+      - description
+      - hashtags
+      title: YouTubeCopy
+    SocialPublishBatchView:
+      properties:
+        id:
+          type: string
+          title: Id
+        render_id:
+          type: string
+          title: Render Id
+        created_at:
+          type: integer
+          title: Created At
+        jobs:
+          items:
+            $ref: '#/components/schemas/SocialPublishJobView'
+          type: array
+          title: Jobs
+      type: object
+      required:
+      - id
+      - render_id
+      - created_at
+      - jobs
+      title: SocialPublishBatchView
+    SocialPublishJobView:
+      properties:
+        id:
+          type: string
+          title: Id
+        platform:
+          type: string
+          enum:
+          - youtube
+          - tiktok
+          - x
+          title: Platform
+        social_account_id:
+          title: Social Account Id
+          type: string
+          nullable: true
+        account_name:
+          title: Account Name
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - queued
+          - uploading
+          - processing
+          - publishing
+          - published
+          - failed
+          title: Status
+        attempt_count:
+          type: integer
+          title: Attempt Count
+        platform_post_id:
+          title: Platform Post Id
+          type: string
+          nullable: true
+        platform_post_url:
+          title: Platform Post Url
+          type: string
+          nullable: true
+        error_code:
+          title: Error Code
+          type: string
+          nullable: true
+        error_message_safe:
+          title: Error Message Safe
+          type: string
+          nullable: true
+        retryable:
+          type: boolean
+          title: Retryable
+        published_at:
+          title: Published At
+          type: integer
+          nullable: true
+        created_at:
+          type: integer
+          title: Created At
+        updated_at:
+          type: integer
+          title: Updated At
+      type: object
+      required:
+      - id
+      - platform
+      - social_account_id
+      - status
+      - attempt_count
+      - platform_post_id
+      - platform_post_url
+      - error_code
+      - error_message_safe
+      - retryable
+      - published_at
+      - created_at
+      - updated_at
+      title: SocialPublishJobView
+    SocialPublishRequest:
+      properties:
+        targets:
+          items:
+            $ref: '#/components/schemas/SocialPublishTarget'
+          type: array
+          maxItems: 3
+          minItems: 1
+          title: Targets
+        approved:
+          type: boolean
+          title: Approved
+      additionalProperties: false
+      type: object
+      required:
+      - targets
+      - approved
+      title: SocialPublishRequest
+    SocialPublishTarget:
+      properties:
+        platform:
+          type: string
+          enum:
+          - youtube
+          - tiktok
+          - x
+          title: Platform
+        social_account_id:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Social Account Id
+        youtube:
+          allOf:
+          - $ref: '#/components/schemas/YouTubePost'
+          nullable: true
+        tiktok:
+          allOf:
+          - $ref: '#/components/schemas/TikTokPost'
+          nullable: true
+        x:
+          allOf:
+          - $ref: '#/components/schemas/XCopy'
+          nullable: true
+      additionalProperties: false
+      type: object
+      required:
+      - platform
+      - social_account_id
+      title: SocialPublishTarget
+    TikTokPost:
+      properties:
+        caption:
+          type: string
+          maxLength: 2200
+          minLength: 1
+          title: Caption
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 5
+          title: Hashtags
+        privacy:
+          type: string
+          enum:
+          - PUBLIC_TO_EVERYONE
+          - MUTUAL_FOLLOW_FRIENDS
+          - FOLLOWER_OF_CREATOR
+          - SELF_ONLY
+          title: Privacy
+        allow_comment:
+          type: boolean
+          title: Allow Comment
+          default: false
+        allow_duet:
+          type: boolean
+          title: Allow Duet
+          default: false
+        allow_stitch:
+          type: boolean
+          title: Allow Stitch
+          default: false
+        brand_content:
+          type: boolean
+          title: Brand Content
+          default: false
+        brand_organic:
+          type: boolean
+          title: Brand Organic
+          default: false
+        is_aigc:
+          type: boolean
+          title: Is Aigc
+          default: false
+        consent:
+          type: boolean
+          title: Consent
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - caption
+      - hashtags
+      - privacy
+      title: TikTokPost
+    YouTubePost:
+      properties:
+        title:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Title
+        description:
+          type: string
+          maxLength: 4800
+          minLength: 1
+          title: Description
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 5
+          title: Hashtags
+        use_thumbnail:
+          type: boolean
+          title: Use Thumbnail
+          default: false
+        visibility:
+          type: string
+          enum:
+          - public
+          - unlisted
+          - private
+          title: Visibility
+          default: private
+        made_for_kids:
+          type: boolean
+          title: Made For Kids
+          default: false
+        contains_synthetic_media:
+          type: boolean
+          title: Contains Synthetic Media
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - title
+      - description
+      - hashtags
+      title: YouTubePost
+    SocialCopySave:
+      properties:
+        copy:
+          additionalProperties:
+            additionalProperties: true
+            type: object
+          type: object
+          title: Copy
+      additionalProperties: false
+      type: object
+      required:
+      - copy
+      title: SocialCopySave
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

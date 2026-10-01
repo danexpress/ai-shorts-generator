@@ -2,17 +2,30 @@
 
 import html
 import json
+from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 
 from ..errors import ApiError
+from ..social.accounts import safe_error
+from ..social.adapters.base import ProviderError
+from ..social.copy import owned_render
+from ..social.db_models import SocialAccount, SocialCopy
 from ..social.models import (
     SocialAccountsView,
     SocialConnectView,
+    SocialCopySave,
+    SocialCopyView,
+    SocialCreatorInfo,
     SocialDisconnected,
+    SocialGenerateRequest,
     SocialPlatform,
+    SocialPublishBatchView,
+    SocialPublishJobView,
+    SocialPublishRequest,
 )
 from ..social.security import SocialUser
 
@@ -49,6 +62,22 @@ def connect(platform: SocialPlatform, request: Request, response: Response, user
 
 @router.get(
     "/social-accounts/{platform}/callback",
+    openapi_extra={
+        "parameters": [
+            {
+                "name": name,
+                "in": "query",
+                "required": name == "state",
+                "schema": {"type": "string"},
+                "description": description,
+            }
+            for name, description in [
+                ("state", "Single-use OAuth state bound to the connecting browser."),
+                ("code", "Provider authorization code; exchanged only on the server."),
+                ("error", "Provider denial; no authorization code is required."),
+            ]
+        ]
+    },
     response_class=HTMLResponse,
     operation_id="socialOAuthCallback",
     responses={200: {"description": "Connection result. Provider credentials are never returned."}},
@@ -96,3 +125,108 @@ def callback(platform: SocialPlatform, request: Request):
 def disconnect(platform: SocialPlatform, request: Request, user: SocialUser):
     request.app.state.social_accounts.disconnect(user, platform)
     return {"ok": True}
+
+
+@router.get(
+    "/renders/{id}/social-copy", response_model=SocialCopyView, operation_id="getSocialCopy"
+)
+def get_copy(id: str, request: Request, user: SocialUser):
+    return request.app.state.social_copy.get(user, id)
+
+
+@router.post(
+    "/renders/{id}/social-copy", response_model=SocialCopyView, operation_id="generateSocialCopy"
+)
+def generate_copy(id: str, body: SocialGenerateRequest, request: Request, user: SocialUser):
+    return request.app.state.social_copy.generate(
+        user, id, body.platforms, transcript_confirmed=body.transcript_confirmed
+    )
+
+
+@router.post(
+    "/renders/{id}/social-copy/regenerate",
+    response_model=SocialCopyView,
+    operation_id="regenerateSocialCopy",
+)
+def regenerate_copy(id: str, body: SocialGenerateRequest, request: Request, user: SocialUser):
+    return request.app.state.social_copy.generate(
+        user, id, body.platforms, True, body.transcript_confirmed
+    )
+
+
+@router.get(
+    "/social-accounts/tiktok/creator-info",
+    response_model=SocialCreatorInfo,
+    operation_id="getTikTokCreatorInfo",
+)
+def tiktok_creator(request: Request, user: SocialUser):
+    service = request.app.state.social_accounts
+    with service.database.transaction() as db:
+        account = db.scalar(
+            select(SocialAccount).where(
+                SocialAccount.user_id == user, SocialAccount.platform == "tiktok"
+            )
+        )
+        if not account:
+            raise ApiError("NOT_FOUND", "Connect TikTok first.", 404)
+        account_id = account.id
+    try:
+        return service.adapter("tiktok").creator_info(service.token(account_id, user, "tiktok"))
+    except ProviderError as error:
+        raise ApiError(error.code, safe_error(error), 409) from None
+
+
+@router.post(
+    "/renders/{id}/publish",
+    response_model=SocialPublishBatchView,
+    status_code=202,
+    operation_id="publishRender",
+)
+def publish(
+    id: str,
+    body: SocialPublishRequest,
+    request: Request,
+    user: SocialUser,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+):
+    return request.app.state.social_publishing.start(user, id, body, idempotency_key)
+
+
+@router.get(
+    "/publish-batches/{id}", response_model=SocialPublishBatchView, operation_id="getPublishBatch"
+)
+def batch(id: str, request: Request, user: SocialUser):
+    return request.app.state.social_publishing.get(user, id)
+
+
+@router.post(
+    "/publish-jobs/{id}/retry", response_model=SocialPublishJobView, operation_id="retryPublishJob"
+)
+def retry_publish(id: str, request: Request, user: SocialUser):
+    return request.app.state.social_publishing.retry(user, id)
+
+
+@router.get(
+    "/renders/{id}/publishing-history",
+    response_model=list[SocialPublishBatchView],
+    operation_id="getPublishingHistory",
+)
+def history(id: str, request: Request, user: SocialUser):
+    return request.app.state.social_publishing.history(user, id)
+
+
+@router.patch(
+    "/renders/{id}/social-copy", response_model=SocialCopyView, operation_id="saveSocialCopy"
+)
+def save_copy(id: str, body: SocialCopySave, request: Request, user: SocialUser):
+    service = request.app.state.social_copy
+    now = int(service.clock() * 1000)
+    with service.database.transaction() as db:
+        owned_render(db, user, id, now)
+        for platform, content in body.content.items():
+            record = db.get(SocialCopy, (id, platform))
+            if not record:
+                record = SocialCopy(render_id=id, platform=platform)
+                db.add(record)
+            record.content, record.model, record.updated_at = content, "creator-edited", now
+    return service.get(user, id)

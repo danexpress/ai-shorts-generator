@@ -19,7 +19,9 @@ from .routers import analysis, auth, media, projects, renders, social, transcrip
 from .social.accounts import AccountService
 from .social.adapters import publishers
 from .social.config import SocialSettings
+from .social.copy import CopyService, SocialCopyGenerator, StructuredCopyModel
 from .social.http import ProviderHTTP
+from .social.publishing import PublishingService
 from .social.security import RedactOAuthQueries
 from .store import Store
 
@@ -32,6 +34,7 @@ def create_app(
     clock: Callable[[], float] = time.time,
     social_settings: SocialSettings | None = None,
     social_adapters: dict | None = None,
+    social_copy_model=None,
 ) -> FastAPI:
     settings = settings or Settings()
     owns_database = database is None
@@ -76,6 +79,15 @@ def create_app(
         social_adapters
         if social_adapters is not None
         else publishers(social_settings, app.state.social_http),
+    )
+    app.state.social_copy = CopyService(
+        database,
+        social_settings,
+        clock,
+        SocialCopyGenerator(social_copy_model or StructuredCopyModel(social_settings)),
+    )
+    app.state.social_publishing = PublishingService(
+        database, settings, app.state.social_accounts, clock
     )
     app.add_middleware(RedactOAuthQueries)
     app.state.database = database

@@ -128,3 +128,12 @@ class SocialRateLimit(Base):
     action: Mapped[str] = mapped_column(String(30), primary_key=True)
     window: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     count: Mapped[int] = mapped_column(Integer)
+
+
+class SocialRefreshLease(Base):
+    __tablename__ = "social_refresh_leases"
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("social_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[int] = mapped_column(BigInteger)

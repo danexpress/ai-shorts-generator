@@ -123,7 +123,9 @@ class TikTokPublisher(SocialPublisher):
         cp = dict(checkpoint)
         if not cp.get("publish_id"):
             # Re-query creator restrictions immediately before initializing the post.
-            self.validate_video(info, metadata, self.creator_info(token))
+            creator = self.creator_info(token)
+            self.validate_video(info, metadata, creator)
+            cp["username"] = creator.get("username")
             chunk_size = min(info["size"], 32 * 1024 * 1024)
             chunks = max(1, info["size"] // chunk_size)
             caption = metadata["caption"] + (
@@ -180,6 +182,8 @@ class TikTokPublisher(SocialPublisher):
             content=chunk,
             expected=(201, 206),
         )
+        if offset + len(chunk) == info["size"]:
+            cp["transfer_complete"] = True
         return PublishStep(
             "processing" if offset + len(chunk) == info["size"] else "uploading",
             cp,

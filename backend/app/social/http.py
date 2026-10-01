@@ -1,5 +1,6 @@
 """Provider transport: no redirects, no raw exceptions or response-body logging."""
 
+import logging
 from urllib.parse import urlparse
 
 import httpx
@@ -9,6 +10,9 @@ from .adapters.base import ProviderError
 
 class ProviderHTTP:
     def __init__(self, transport=None):
+        # HTTP debug logs can include upload capability URLs and auth headers.
+        for name in ("httpx", "httpcore"):
+            logging.getLogger(name).setLevel(logging.WARNING)
         self.client = httpx.Client(
             timeout=httpx.Timeout(45, connect=10), follow_redirects=False, transport=transport
         )
@@ -16,7 +20,8 @@ class ProviderHTTP:
     def request(self, method, url, *, hosts, expected=(200, 201, 202, 204), **kwargs):
         parsed = urlparse(url)
         if (
-            parsed.scheme != "https"
+            not parsed.hostname
+            or parsed.scheme != "https"
             or parsed.username
             or parsed.password
             or not any(

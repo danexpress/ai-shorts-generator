@@ -634,6 +634,31 @@ class Store:
             else:
                 job.update(state="canceled", finishedAt=self.now())
                 self.release_job(job)
+        # Deleting a project also cancels queued social work and removes private drafts.
+        # Published external posts are deliberately not deleted remotely.
+        from .social.db_models import PublishBatch, PublishJob
+
+        batch_ids = select(PublishBatch.id).where(PublishBatch.project_id == p.id)
+        self.db.execute(
+            update(PublishJob)
+            .where(PublishJob.publish_batch_id.in_(batch_ids))
+            .values(
+                post_metadata={},
+                checkpoint_encrypted=None,
+                lease_owner=None,
+                lease_until=None,
+                retryable=False,
+            )
+        )
+        self.db.execute(
+            update(PublishJob)
+            .where(PublishJob.publish_batch_id.in_(batch_ids), PublishJob.status != "published")
+            .values(
+                status="failed",
+                error_code="ACCOUNT_DISCONNECTED",
+                error_message_safe="This project was deleted.",
+            )
+        )
         self.purge_content(p)
         self.purge_source(p)
         render_root = (self.settings.media_dir / "renders").resolve()

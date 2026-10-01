@@ -10,7 +10,7 @@ from ..errors import ApiError
 from ..store import oid
 from .adapters.base import ProviderError
 from .config import PLATFORMS
-from .db_models import OAuthState, SocialAccount, SocialEvent, SocialRateLimit
+from .db_models import OAuthState, SocialAccount, SocialEvent, SocialRateLimit, SocialRefreshLease
 from .security import TokenCipher, digest
 
 SAFE_ERRORS = {
@@ -152,25 +152,47 @@ class AccountService:
             if not user or not user.active or not user.invited:
                 raise ApiError("ACCOUNT_DISABLED", "Your account is unavailable.", 403)
             verifier = self.cipher.decrypt(record.verifier_encrypted, user_id, platform)
-            db.delete(record)
+            record.browser_digest = (
+                ""  # Consume browser binding before provider I/O; disconnect can still cancel.
+            )
         if denied or not code:
+            self.discard_state(state)
             raise ApiError(
                 "OAUTH_DENIED", "The connection was not approved. You can try again.", 400
             )
         try:
             tokens = adapter.exchange(code, verifier)
-            if not tokens.access or not set(adapter.scopes).issubset(tokens.scopes):
+            if (
+                not tokens.access
+                or tokens.expires_in <= 0
+                or not set(adapter.scopes).issubset(tokens.scopes)
+            ):
                 raise ProviderError("PERMISSION_REQUIRED")
             identity = adapter.identity(tokens.access)
         except ProviderError as error:
+            self.discard_state(state)
             raise ApiError(error.code, safe_error(error), 400) from None
+        except (KeyError, ValueError, TypeError, IndexError):
+            self.discard_state(state)
+            raise ApiError(
+                "PROVIDER_RESPONSE_INVALID",
+                "The platform returned an invalid account response. Try connecting again.",
+                502,
+            ) from None
         if not identity.id or not identity.name:
+            self.discard_state(state)
             raise ApiError(
                 "PROVIDER_RESPONSE_INVALID", "The platform did not return an account.", 502
             )
         with self.database.transaction() as db:
-            # A disconnect during exchange cancels the connection through missing state
-            # only before consumption; a completed OAuth is an explicit new connection.
+            pending = db.get(OAuthState, digest(state))
+            if not pending or pending.expires_at <= self.now():
+                raise ApiError(
+                    "OAUTH_STATE_INVALID",
+                    "This connection was canceled or expired. Start again from Social Accounts.",
+                    400,
+                )
+            db.delete(pending)
             user = db.get(UserRecord, user_id)
             if not user or not user.active or not user.invited:
                 raise ApiError("ACCOUNT_DISABLED", "Your account is unavailable.", 403)
@@ -218,8 +240,13 @@ class AccountService:
             )
             event(db, user_id, "social_account_connected", self.now(), platform, account.id)
 
+    def discard_state(self, state):
+        with self.database.transaction() as db:
+            db.execute(delete(OAuthState).where(OAuthState.digest == digest(state)))
+
     def token(self, account_id, user_id, platform):
         adapter = self.adapter(platform)
+        owner = oid("refresh")
         with self.database.transaction() as db:
             account = db.get(SocialAccount, account_id)
             if not account or account.user_id != user_id or account.platform != platform:
@@ -230,16 +257,53 @@ class AccountService:
                 raise ProviderError("PERMISSION_REQUIRED")
             if account.token_expires_at > self.now() + 120_000:
                 return self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
+            lease = db.get(SocialRefreshLease, account_id)
+            if lease and lease.expires_at > self.now():
+                raise ProviderError("PROVIDER_UNAVAILABLE", retryable=True)
+            if not lease:
+                lease = SocialRefreshLease(account_id=account_id)
+                db.add(lease)
+            lease.owner, lease.expires_at = owner, self.now() + 120_000
             refresh = (
                 self.cipher.decrypt(account.refresh_token_encrypted, user_id, platform)
                 if account.refresh_token_encrypted
                 else None
             )
-            version = account.version
+            version, platform_user_id = account.version, account.platform_user_id
         try:
             if not refresh:
                 raise ProviderError("RECONNECT_REQUIRED")
             tokens = adapter.refresh_token(refresh)
+            if (
+                not tokens.access
+                or tokens.expires_in <= 0
+                or not set(adapter.scopes).issubset(tokens.scopes)
+            ):
+                raise ProviderError("RECONNECT_REQUIRED")
+            with self.database.transaction() as db:
+                account = db.get(SocialAccount, account_id)
+                if (
+                    not account
+                    or account.user_id != user_id
+                    or account.platform_user_id != platform_user_id
+                ):
+                    raise ProviderError("ACCOUNT_DISCONNECTED")
+                if account.version != version:
+                    return self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
+                account.access_token_encrypted = self.cipher.encrypt(
+                    tokens.access, user_id, platform
+                )
+                if tokens.refresh:
+                    account.refresh_token_encrypted = self.cipher.encrypt(
+                        tokens.refresh, user_id, platform
+                    )
+                account.token_expires_at, account.updated_at = (
+                    self.now() + tokens.expires_in * 1000,
+                    self.now(),
+                )
+                account.scopes = tokens.scopes
+                account.version += 1
+                return tokens.access
         except ProviderError as error:
             if error.code in {"RECONNECT_REQUIRED", "PERMISSION_REQUIRED"}:
                 with self.database.transaction() as db:
@@ -247,24 +311,11 @@ class AccountService:
                     if account and account.version == version:
                         account.status, account.updated_at = "reconnect_required", self.now()
             raise
-        with self.database.transaction() as db:
-            account = db.get(SocialAccount, account_id)
-            if not account or account.user_id != user_id:
-                raise ProviderError("ACCOUNT_DISCONNECTED")
-            if account.version != version:
-                # Another refresher won; do not overwrite its rotated refresh token.
-                return self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
-            account.access_token_encrypted = self.cipher.encrypt(tokens.access, user_id, platform)
-            if tokens.refresh:
-                account.refresh_token_encrypted = self.cipher.encrypt(
-                    tokens.refresh, user_id, platform
-                )
-            account.token_expires_at, account.updated_at = (
-                self.now() + tokens.expires_in * 1000,
-                self.now(),
-            )
-            account.version += 1
-            return tokens.access
+        finally:
+            with self.database.transaction() as db:
+                lease = db.get(SocialRefreshLease, account_id)
+                if lease and lease.owner == owner:
+                    db.delete(lease)
 
     def disconnect(self, user_id, platform):
         with self.database.transaction() as db:
@@ -280,11 +331,14 @@ class AccountService:
             )
             if not account:
                 return
-            token = self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
+            try:
+                token = self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
+            except ApiError:
+                token = None
             db.delete(account)
             event(db, user_id, "social_account_disconnected", self.now(), platform)
         try:
-            if platform in self.adapters:
+            if token and platform in self.adapters:
                 self.adapters[platform].disconnect(token)
         except ProviderError:
             # Local token deletion always succeeds, even if provider revocation is down.

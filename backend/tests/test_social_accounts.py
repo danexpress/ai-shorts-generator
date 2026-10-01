@@ -1,67 +1,10 @@
-from urllib.parse import parse_qs, urlparse
-
 import pytest
 from conftest import assert_error, login, record, rows
 from cryptography.fernet import Fernet
 
-from app.social.accounts import AccountService
-from app.social.adapters.base import Identity, ProviderError, Tokens
-from app.social.config import PLATFORMS, SocialSettings
+from app.social.adapters.base import ProviderError
 from app.social.db_models import OAuthState, SocialAccount, SocialEvent
 from app.social.security import TokenCipher
-
-
-class FakeAccountAdapter:
-    scopes = ("publish", "profile")
-
-    def connect(self, state, verifier):
-        return "https://provider.example/authorize?state=" + state
-
-    def exchange(self, code, verifier):
-        assert code == "approved"
-        return Tokens("private-access", "private-refresh", 3600, list(self.scopes))
-
-    def identity(self, token):
-        return Identity("creator-1", "Fred Creates", "@fred", "https://provider.example/avatar.png")
-
-    def refresh_token(self, refresh):
-        assert refresh == "private-refresh"
-        return Tokens("rotated-access", "rotated-refresh", 3600, list(self.scopes))
-
-    def disconnect(self, token):
-        pass
-
-
-@pytest.fixture
-def social(client, app):
-    settings = SocialSettings(
-        public_url="https://api.example",
-        frontend_url="https://studio.example",
-        encryption_keys=Fernet.generate_key().decode(),
-        enabled={p: True for p in PLATFORMS},
-        clients={p: {"id": "client", "secret": "secret"} for p in PLATFORMS},
-    )
-    adapter = FakeAccountAdapter()
-    service = AccountService(
-        app.state.database, settings, app.state.clock, {p: adapter for p in PLATFORMS}
-    )
-    app.state.social_accounts = service
-    return service, adapter
-
-
-def connect(client, headers, platform="youtube"):
-    result = client.get(f"/v1/social-accounts/{platform}/connect", headers=headers)
-    assert result.status_code == 200, result.text
-    state = parse_qs(urlparse(result.json()["authorization_url"]).query)["state"][0]
-    return state, result.cookies[f"social_oauth_{platform}"]
-
-
-def callback(client, state, binding, platform="youtube", **params):
-    return client.get(
-        f"/v1/social-accounts/{platform}/callback",
-        params={"state": state, "code": "approved", **params},
-        headers={"Cookie": f"social_oauth_{platform}={binding}"},
-    )
 
 
 def test_disabled_platforms_and_no_secrets(client, headers):
@@ -171,3 +114,54 @@ def test_connection_rate_limit(client, headers, social):
         429,
         "SOCIAL_RATE_LIMITED",
     )
+
+
+from social_helpers import callback, connect
+
+
+def test_refresh_lease_prevents_concurrent_rotating_refreshes(
+    client, headers, database, clock, social
+):
+    from app.social.db_models import SocialRefreshLease
+
+    state, binding = connect(client, headers)
+    callback(client, state, binding)
+    account = rows(database, SocialAccount)[0]
+    clock.advance(3500)
+    with database.transaction() as db:
+        db.add(
+            SocialRefreshLease(
+                account_id=account["id"],
+                owner="another-worker",
+                expires_at=int(clock() * 1000) + 60_000,
+            )
+        )
+    with pytest.raises(ProviderError) as result:
+        social[0].token(account["id"], account["user_id"], "youtube")
+    assert result.value.retryable
+    clock.advance(61)
+    assert social[0].token(account["id"], account["user_id"], "youtube") == "rotated-access"
+
+
+def test_disconnect_during_oauth_exchange_cancels_connection(client, headers, social):
+    from conftest import rows
+
+    from app.social.db_models import SocialAccount
+
+    service, adapter = social
+    state, binding = connect(client, headers)
+    original = adapter.identity
+
+    def identity(token):
+        from app.social.db_models import OAuthState
+
+        with service.database.transaction() as db:
+            user = db.get(
+                OAuthState, __import__("hashlib").sha256(state.encode()).hexdigest()
+            ).user_id
+        service.disconnect(user, "youtube")
+        return original(token)
+
+    adapter.identity = identity
+    result = callback(client, state, binding)
+    assert "canceled" in result.text and not rows(service.database, SocialAccount)

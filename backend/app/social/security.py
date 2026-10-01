@@ -78,11 +78,13 @@ class RedactOAuthQueries:
             and scope.get("path", "").startswith("/v1/social-accounts/")
             and scope["path"].endswith("/callback")
         ):
-            scope["social_callback_params"] = {
-                k: v[0]
-                for k, v in parse_qs(
-                    scope.get("query_string", b"").decode(), max_num_fields=12
-                ).items()
-            }
+            raw = scope.get("query_string", b"")
             scope["query_string"] = b""
+            try:
+                params = parse_qs(raw.decode(), max_num_fields=12)
+                scope["social_callback_params"] = {
+                    k: v[0] for k, v in params.items() if len(v) == 1
+                }
+            except (UnicodeDecodeError, ValueError):
+                scope["social_callback_params"] = {}
         await self.app(scope, receive, send)

@@ -116,3 +116,6 @@ def ready(client, headers, clock, **overrides):
 def assert_error(response, status, code):
     assert response.status_code == status, response.text
     assert response.json()["error"]["code"] == code, response.text
+
+
+pytest_plugins = ["social_helpers"]

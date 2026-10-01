@@ -41,4 +41,12 @@ class Settings:
         )
     )
     # Explicit allowlist: no wildcard origins with browser credentials.
-    cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")
+    cors_origins: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            origin.strip()
+            for origin in os.environ.get(
+                "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+            ).split(",")
+            if origin.strip()
+        )
+    )

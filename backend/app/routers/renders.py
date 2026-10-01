@@ -11,6 +11,7 @@ from ..db_models import RenderRecord, UploadRecord
 from ..errors import ApiError
 from ..models import RenderedClip, RenderRequest
 from ..renderer import RendererUnavailable, RenderFailed, render_short
+from ..social.copy import render_context
 from .media import media_signature
 
 router = APIRouter(prefix="/v1/projects", tags=["Renders"])
@@ -77,6 +78,11 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
         expiresAt=expires_at,
     )
     store.db.add(record)
+    store.db.flush()
+    try:
+        render_context(store.db, record)
+    except ApiError:
+        pass  # Missing copy context never prevents rendering/downloading.
     project.renderCount += 1
     expires = now // 1000 + 30 * 60
     signature = media_signature(render_id, expires, store.settings.media_signing_key)
