@@ -540,3 +540,61 @@ for (const duration of [10800, 10801]) {
     }
   });
 }
+
+const socialCopy = { youtube: {title:'A faithful title', description:'The actual insight.', hashtags:['#Shorts']}, tiktok: {caption:'The insight in a conversational tone.', hashtags:[]}, x:{text:'A distinct insight for X.'} };
+const socialAccounts = {accounts:['youtube','tiktok','x'].map(platform=>({id:'acct-'+platform,platform,account_name:'Creator',status:'connected'})),platforms:['youtube','tiktok','x'].map(platform=>({platform,enabled:true})),copy_available:true};
+async function publishingPage(t, overrides={}) {
+  const api={me:async()=>session,listProjects:async()=>[],listSocialAccounts:async()=>socialAccounts,getSocialCopy:async()=>({copy:socialCopy,transcript_verified:true,source_transcript:'The actual insight.'}),getPublishingHistory:async()=>[],getTikTokCreatorInfo:async()=>({privacy_options:['SELF_ONLY']}),...overrides};
+  const page=component({...S,createApi:()=>api});t.after(()=>page.componentWillUnmount());await page.componentDidMount();
+  await page.openPublish({id:'rnd_abc',url:'http://api.test/v1/media/rendered/rnd_abc'});
+  return page;
+}
+
+test('opening cached publishing copy never posts automatically and selects no platforms',async t=>{
+  let publishes=0,generates=0;
+  const page=await publishingPage(t,{publishRender:async()=>publishes++,generateSocialCopy:async()=>generates++});
+  assert.equal(page.state.route,'publish');assert.equal(Object.keys(page.state.publishing.selected).length,0);
+  assert.equal(page.state.publishing.copy.youtube.title,socialCopy.youtube.title);assert.equal(publishes,0);assert.equal(generates,0);
+});
+
+test('Publish Everywhere sends only explicit selections and reuses the request key after a network failure',async t=>{
+  const calls=[];
+  const page=await publishingPage(t,{publishRender:async(...args)=>{calls.push(args);throw new S.ApiError('NETWORK_ERROR');}});
+  page.editSocialCopy('x','text','My own reviewed text');page.selectPublishPlatform('x',true);
+  await page.publishEverywhere();await page.publishEverywhere();
+  assert.equal(calls.length,2);assert.equal(calls[0][1].approved,true);assert.equal(calls[0][1].targets.length,1);
+  assert.equal(calls[0][1].targets[0].platform,'x');assert.equal(calls[0][1].targets[0].x.text,'My own reviewed text');
+  assert.equal(calls[0][2].idempotencyKey,calls[1][2].idempotencyKey);
+});
+
+test('successful admission clears selections and leaves successful platforms out of later batches',async t=>{
+  const calls=[];let batch;
+  const page=await publishingPage(t,{publishRender:async(id,body)=>{calls.push(body);return batch={id:'batch',created_at:Date.now(),jobs:body.targets.map(target=>({id:'job-'+target.platform,platform:target.platform,status:'published'}))};},getPublishBatch:async()=>batch});
+  page.selectPublishPlatform('youtube',true);await page.publishEverywhere();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(Object.keys(page.state.publishing.selected).length,0);
+  page.selectPublishPlatform('x',true);await page.publishEverywhere();
+  assert.equal(calls[1].targets.length,1);assert.equal(calls[1].targets[0].platform,'x');
+});
+
+test('individual regeneration keeps other platform edits and passes transcript approval',async t=>{
+  const requests=[];
+  const page=await publishingPage(t,{regenerateSocialCopy:async(id,body)=>{requests.push(body);return {copy:{youtube:{...socialCopy.youtube,title:'Another faithful title'}}};}});
+  page.editSocialCopy('x','text','My edited X copy');await page.generateSocialCopy('youtube');
+  assert.equal(page.state.publishing.copy.x.text,'My edited X copy');assert.equal(page.state.publishing.copy.youtube.title,'Another faithful title');
+  assert.equal(requests[0].platforms.join(','),'youtube');assert.equal(requests[0].transcript_confirmed,true);
+});
+
+test('late AI output cannot restore private publishing data after logout',async t=>{
+  let finish;
+  const page=await publishingPage(t,{regenerateSocialCopy:()=>new Promise(resolve=>finish=resolve)});
+  const pending=page.generateSocialCopy('x');page.resetSession();finish({copy:{x:{text:'Private late output'}}});await pending;
+  assert.equal(page.state.route,'login');assert.equal(Object.keys(page.state.publishing.copy).length,0);
+  assert.equal(page.state.social.accounts.length,0);assert.equal(page.state.publishing.history.length,0);
+});
+
+test('retry calls only the failed job endpoint',async t=>{
+  const retries=[];
+  const batch={id:'batch',created_at:Date.now(),jobs:[{id:'yt',platform:'youtube',status:'published'},{id:'x',platform:'x',status:'failed',retryable:true}]};
+  const page=await publishingPage(t,{getPublishingHistory:async()=>[batch],retryPublishJob:async id=>retries.push(id),getPublishBatch:async()=>batch});
+  await page.retrySocialJob(batch.jobs[1]);assert.deepEqual(retries,['x']);
+});

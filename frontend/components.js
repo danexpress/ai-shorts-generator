@@ -1670,6 +1670,11 @@
             { className: "panel pad stack" },
             h("h2", null, "Prepare to publish"),
             h(
+              Button,
+              { primary: true, onClick: () => v.openPublish(r), icon: "arrow" },
+              "Review & publish",
+            ),
+            h(
               "div",
               {
                 className: "segmented",
@@ -1752,6 +1757,7 @@
           ),
         ),
       ),
+      h(root.ShortsSocialUI.PublishingHistory, { v }),
     );
   }
   function Transcript({ v }) {
@@ -2224,6 +2230,7 @@
       suggestions: Suggestions,
       editor: Editor,
       result: Result,
+      publish: root.ShortsSocialUI.Publish,
       transcript: Transcript,
       usage: Usage,
       settings: Settings,

@@ -52,7 +52,7 @@ The frontend uses password sign-in and adds the bearer token automatically. Run 
 
 ## Backend behavior
 
-Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions, metadata generation, and object storage are not implemented. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
+Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions and object storage are not implemented. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
 
@@ -66,4 +66,10 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 
-Run `make test` and `make lint` from the repository root. Tests cover all 24 routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
+Run `make test` and `make lint` from the repository root. Tests cover the existing and social routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
+
+## Social publishing
+
+Connect accounts under **Settings → Social Accounts**, then open a rendered Short and choose **Review & publish**. YouTube, TikTok and X use separate official API adapters, encrypted user OAuth tokens and independent persistent publishing jobs. Start `make worker` in a third terminal using the same environment, database and media directory as `make run`. Platforms default disabled until configured.
+
+See [social publishing setup, callbacks, scopes, approvals and security](../docs/social-publishing.md) and the [environment template](.env.social.example). The OpenAPI contract includes the new endpoints, including the asynchronous 202 publish response. No live platform credentials or copy-model key are included.

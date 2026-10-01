@@ -19,7 +19,7 @@ Video previews preserve the full source frame. Clip previews stop at the selecte
 
 ## Backend capability boundaries
 
-The existing API renders MP4 videos and exports TXT/JSON transcripts. Caption styles, burned-in hook text, watermark rendering, cover/SRT/ASS downloads, and generated platform metadata are not implemented by the API. Their requested UI surfaces are clearly marked unavailable. Unavailable caption/branding controls and additional downloads sit in compact disclosures so the primary workflow stays clear. The suggested hook can be copied for publishing; the UI does not fabricate platform-specific metadata or imply that disabled settings affect the exported video.
+The existing API renders MP4 videos and exports TXT/JSON transcripts. Caption styles, burned-in hook text, watermark rendering, and cover/SRT/ASS downloads are not implemented by the original rendering API. Optional platform-specific social copy is now provided by the configured social copy service. Their requested UI surfaces are clearly marked unavailable. Unavailable caption/branding controls and additional downloads sit in compact disclosures so the primary workflow stays clear. The suggested hook can be copied for publishing; the UI does not fabricate platform-specific metadata or imply that disabled settings affect the exported video.
 
 Source retention is 24 hours; rendered files are retained for 7 days; analysis for 30 days. The upload contract accepts MP4/MOV/WebM, 30 seconds–3 hours, up to 4 GB. YouTube import appears only when the backend enables it (`YOUTUBE_IMPORT=true`).
 
@@ -45,3 +45,9 @@ node frontend/browser-smoke.cjs
 ```
 
 `CHROME_PATH` overrides the default macOS Chrome executable. `FRONTEND_TEST_URL` and `SCREENSHOT_DIR` can override the frontend URL and screenshot directory. Screenshots and test media should stay outside the repository.
+
+## Social publishing
+
+`social-ui.js` contains Social Accounts, the review/editor screen and shared publishing history. The page controller and HTTP client handle OAuth popup validation, cached/edited copy, explicit approval, real batch polling and failed-only retries. Settings → Social Accounts manages connections; rendered Shorts link to **Review & publish**. Native YouTube, TikTok and X drafts are separate. No platform is selected automatically. TikTok settings come from live creator info, with no initial privacy choice and separate required consent. AI generation requires review of the saved transcript because the existing transcription engine is a simulator.
+
+Configure platform credentials/flags, a copy model and the worker as described in [social publishing setup](../docs/social-publishing.md). `social-browser-smoke.cjs` adds mocked provider publishing checks to the optional browser regression; no external content is posted.

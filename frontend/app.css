@@ -1819,3 +1819,38 @@ details[open] > summary {
     margin-top: var(--s2);
   }
 }
+
+/* Social review reuses the editor, panels and control tokens. */
+.social-target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+.social-target-note {
+  flex-basis: 100%;
+}
+.social-job {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 2fr);
+  gap: var(--s3);
+  padding-block: var(--s2);
+}
+.publish-actions {
+  display: flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.block {
+  display: block;
+}
+@media (max-width: 640px) {
+  .publish-actions .btn {
+    flex: 1;
+  }
+  .social-job {
+    grid-template-columns: 1fr;
+  }
+}

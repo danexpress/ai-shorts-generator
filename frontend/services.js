@@ -72,6 +72,16 @@
 
   // [method, HTTP verb, path]. {id} = first positional argument.
   const ENDPOINTS = [
+    ['getSocialCopy', 'GET', '/v1/renders/{id}/social-copy'],
+    ['generateSocialCopy', 'POST', '/v1/renders/{id}/social-copy'],
+    ['regenerateSocialCopy', 'POST', '/v1/renders/{id}/social-copy/regenerate'],
+    ['saveSocialCopy', 'PATCH', '/v1/renders/{id}/social-copy'],
+    ['getTikTokCreatorInfo', 'GET', '/v1/social-accounts/tiktok/creator-info'],
+    ['publishRender', 'POST', '/v1/renders/{id}/publish'],
+    ['getPublishBatch', 'GET', '/v1/publish-batches/{id}'],
+    ['retryPublishJob', 'POST', '/v1/publish-jobs/{id}/retry'],
+    ['getPublishingHistory', 'GET', '/v1/renders/{id}/publishing-history'],
+
     ['listSocialAccounts', 'GET', '/v1/social-accounts'],
     ['connectSocialAccount', 'GET', '/v1/social-accounts/{id}/connect'],
     ['disconnectSocialAccount', 'DELETE', '/v1/social-accounts/{id}'],
@@ -779,6 +789,8 @@
 
     api.listSocialAccounts = () => op(() => { requireUser(); return {accounts: [], platforms: ['youtube','tiktok','x'].map(platform => ({platform, enabled: false, notice: 'Social publishing needs a configured backend.', private_only: false})), copy_available: false}; });
     api.connectSocialAccount = api.disconnectSocialAccount = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
+
+    for (const method of ['getSocialCopy','generateSocialCopy','regenerateSocialCopy','saveSocialCopy','getTikTokCreatorInfo','publishRender','getPublishBatch','retryPublishJob','getPublishingHistory']) api[method] = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
     // Test/demo hooks — deliberately outside the API contract.
     Object.defineProperty(api, '_mock', {

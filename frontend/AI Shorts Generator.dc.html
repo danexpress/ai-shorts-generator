@@ -38,6 +38,7 @@ class Component extends DCLogic {
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
     renderedClips: [], renderingId: null, resolution: 1080, result: null, renderError: null,
+    publishing: {loading:false, busy:false, error:null, copy:{}, selected:{}, settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}}, history:[], batch:null, creator:null, creatorError:null},
     social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
     theme: 'system', dashboardLoading: false, dashboardError: null, clipsError: null,
     transcriptError: null, savingTranscript: false, usageLoading: false, usageError: null, usageEntries: [],
@@ -52,7 +53,7 @@ class Component extends DCLogic {
       if (!this.socialPopup || event.source !== this.socialPopup || event.origin !== new URL(window.SHORTS_CONFIG.apiBaseUrl || window.location.origin).origin || event.data?.type !== 'shorts-social-connection') return;
       this.socialPopup = null;
       this.setState(s => ({ social: { ...s.social, busy: false, error: event.data.ok ? null : 'The connection was not completed. Try connecting again.' } }));
-      this.loadSocialAccounts();
+      this.loadSocialAccounts().then(() => { if (this.state.route === 'publish') this.loadPublish(this.state.result, true); });
     };
     window.addEventListener?.('message', this.socialListener);
     try { this.setTheme(window.localStorage.getItem('shorts-theme') || 'system'); } catch (_) {}
@@ -67,7 +68,7 @@ class Component extends DCLogic {
     };
     return boot();
   }
-  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
 
   async restoreSession() {
     const request = this.sessionRequest = (this.sessionRequest || 0) + 1;
@@ -107,10 +108,13 @@ class Component extends DCLogic {
   }
   resetSession(message = null) {
     this.sessionRequest = (this.sessionRequest || 0) + 1;
+    this.publishKey = null;
+    clearTimeout(this.publishTimer); clearInterval(this.socialPopupTimer); this.publishVersion = (this.publishVersion || 0) + 1;
     this.probeVersion = (this.probeVersion || 0) + 1;
     this.stopPolling();
     this.releasePreviewUrls();
     this.setState({ route: 'login', bootError: null, me: null, loginPassword: '', loginError: message,
+      publishing: {loading:false,busy:false,error:null,copy:{},selected:{},settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}},history:[],batch:null,creator:null,creatorError:null},
       social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -170,7 +174,7 @@ class Component extends DCLogic {
     finally { this.setState({ dashboardLoading: false }); }
   }
   go(route) {
-    this.stopPolling();
+    this.stopPolling(); clearTimeout(this.publishTimer);
     this.setState({ route, previewId: null });
     if (route === 'dashboard' || route === 'projects') this.loadDashboard();
     if (route === 'usage') this.loadUsage();
@@ -202,6 +206,108 @@ class Component extends DCLogic {
     try { await this.api.disconnectSocialAccount(platform); await this.loadSocialAccounts(); }
     catch(e) { if (!this.handleAuth(e)) this.setState(s => ({social: {...s.social, error: e.message}})); }
     finally { this.setState(s => ({social: {...s.social, busy: false}})); }
+  }
+  renderId(result = this.state.result) {
+    return result?.id || /\/rendered\/(rnd_[a-f0-9]+)/.exec(result?.url || '')?.[1];
+  }
+  async openResult(result) {
+    this.setState(s=>({result,route:'result',publishing:{...s.publishing,history:[]}}));
+    const id=this.renderId(result), epoch=this.sessionRequest;
+    if (!id || !this.api.getPublishingHistory) return;
+    try { const history=await this.api.getPublishingHistory(id); if(epoch===this.sessionRequest&&id===this.renderId()&&this.state.me) this.setState(s=>({publishing:{...s.publishing,history}})); }
+    catch(e) { if(epoch===this.sessionRequest) this.handleAuth(e); }
+  }
+  async openPublish(result = this.state.result) {
+    const id = this.renderId(result);
+    if (!id) return this.notify('Open a rendered Short from this backend to publish it.');
+    clearTimeout(this.publishTimer);
+    this.setState({route:'publish',result:{...result,id}});
+    await this.loadPublish({...result,id});
+  }
+  async loadPublish(result, keepCopy = false) {
+    const id = this.renderId(result), version = this.publishVersion = (this.publishVersion || 0) + 1;
+    this.setState(s => ({publishing:{...s.publishing,loading:true,error:null,...(!keepCopy?{copy:{},selected:{},batch:null,history:[],creator:null,creatorError:null,settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}}}:{})}}));
+    try {
+      const [accounts, copy, history] = await Promise.all([this.api.listSocialAccounts(),this.api.getSocialCopy(id),this.api.getPublishingHistory(id)]);
+      if (version !== this.publishVersion || !this.state.me || this.disposed) return;
+      this.setState(s => ({social:{...s.social,...accounts},publishing:{...s.publishing,loading:false,copy:keepCopy?s.publishing.copy:{youtube:{title:'',description:'',hashtags:[]},tiktok:{caption:'',hashtags:[]},x:{text:''},...copy.copy},history,sourceTranscript:copy.source_transcript,transcriptConfirmed:!!copy.transcript_verified,batch:history[0]||null}}));
+      const tiktok = accounts.accounts.find(a=>a.platform==='tiktok'&&a.status==='connected');
+      if (tiktok) {
+        try { const creator=await this.api.getTikTokCreatorInfo(); if(version===this.publishVersion&&this.state.me) this.setState(s=>({publishing:{...s.publishing,creator,creatorError:null}})); }
+        catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,creator:null,creatorError:e.message}})); }
+      }
+      if (version!==this.publishVersion || !this.state.me) return;
+      if (!keepCopy && copy.transcript_verified && accounts.copy_available && Object.keys(copy.copy).length===0) await this.generateSocialCopy(null, false);
+      const active=history.find(b=>b.jobs.some(j=>!['published','failed'].includes(j.status)));
+      if (version===this.publishVersion && active) this.pollPublish(active.id,id);
+    } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,loading:false,error:e.message}})); }
+  }
+  editSocialCopy(platform, field, value) {
+    this.setState(s => ({publishing:{...s.publishing,error:null,copy:{...s.publishing.copy,[platform]:{...s.publishing.copy[platform],[field]:value}}}}));
+    this.publishKey = null;
+  }
+  editPublishSetting(platform, field, value) {
+    this.setState(s => ({publishing:{...s.publishing,settings:{...s.publishing.settings,[platform]:{...s.publishing.settings[platform],[field]:value}}}})); this.publishKey=null;
+  }
+  selectPublishPlatform(platform, value) {
+    this.setState(s=>({publishing:{...s.publishing,selected:{...s.publishing.selected,[platform]:value}}})); this.publishKey=null;
+  }
+  async generateSocialCopy(platform = null, regenerate = true) {
+    if (this.state.publishing.busy) return;
+    const id=this.renderId(), version=this.publishVersion;
+    this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
+    try {
+      const result=await this.api[regenerate?'regenerateSocialCopy':'generateSocialCopy'](id,{platforms:platform?[platform]:['youtube','tiktok','x'],transcript_confirmed:!!this.state.publishing.transcriptConfirmed});
+      if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return;
+      this.setState(s=>({publishing:{...s.publishing,copy:{...s.publishing.copy,...Object.fromEntries((platform?[platform]:['youtube','tiktok','x']).map(p=>[p,result.copy[p]]))}}})); this.publishKey=null;
+    } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
+    finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
+  }
+  async saveSocialDraft(platform) {
+    const id=this.renderId(), version=this.publishVersion;
+    const data=this.state.publishing.copy[platform]; if(!data) return;
+    const fields=platform==='youtube'?['title','description','hashtags']:platform==='tiktok'?['caption','hashtags']:['text'];
+    if(fields.some(f=>data[f]===undefined||(typeof data[f]==='string'&&!data[f].trim()))) return;
+    try { await this.api.saveSocialCopy(id,{copy:{[platform]:data}}); }
+    catch(e) { if(version===this.publishVersion&&this.state.me&&id===this.renderId()&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
+  }
+  async publishEverywhere() {
+    const state=this.state.publishing;
+    if(state.busy || state.loading) return;
+    const id=this.renderId(), version=this.publishVersion;
+    const targets=Object.keys(state.selected).filter(p=>state.selected[p]&&!state.history.some(b=>b.jobs.some(j=>j.platform===p))).map(platform=>({platform,social_account_id:this.state.social.accounts.find(a=>a.platform===platform)?.id,[platform]:{...state.copy[platform],...(state.settings[platform]||{})}}));
+    if(!targets.length) return;
+    this.publishKey=this.publishKey||idem();
+    this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
+    try {
+      const batch=await this.api.publishRender(id,{targets,approved:true},{idempotencyKey:this.publishKey});
+      if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return;
+      this.setState(s=>({publishing:{...s.publishing,selected:{},batch,history:[batch,...s.publishing.history.filter(b=>b.id!==batch.id)]}}));
+      this.pollPublish(batch.id,id);
+    } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
+    finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
+  }
+  async pollPublish(batchId,renderId) {
+    clearTimeout(this.publishTimer);
+    const version=this.publishVersion;
+    try {
+      const batch=await this.api.getPublishBatch(batchId);
+      const other=await Promise.all(this.state.publishing.history.filter(b=>b.id!==batchId&&b.jobs.some(j=>!['published','failed'].includes(j.status))).map(b=>this.api.getPublishBatch(b.id)));
+      if(version!==this.publishVersion||!this.state.me||renderId!==this.renderId()||this.state.route!=='publish') return;
+      this.setState(s=>({publishing:{...s.publishing,batch,history:[batch,...s.publishing.history.filter(b=>b.id!==batch.id).map(b=>other.find(updated=>updated.id===b.id)||b)]}}));
+      if(this.state.publishing.history.some(b=>b.jobs.some(j=>!['published','failed'].includes(j.status)))) this.publishTimer=setTimeout(()=>this.pollPublish(batchId,renderId),3000);
+    } catch(e) {
+      if(version!==this.publishVersion||!this.state.me) return;
+      if(!this.handleAuth(e)) { this.setState(s=>({publishing:{...s.publishing,error:'We could not refresh publishing status. Your jobs are still saved. Try refreshing the status.'}})); }
+    }
+  }
+  async retrySocialJob(job) {
+    if(this.state.publishing.busy) return;
+    const version=this.publishVersion, id=this.renderId();
+    this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
+    try { await this.api.retryPublishJob(job.id); if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return; this.pollPublish(this.state.publishing.history.find(b=>b.jobs.some(j=>j.id===job.id))?.id,this.renderId()); }
+    catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
+    finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
   }
   async loadUsage() {
     this.setState({ usageLoading: true, usageError: null });
@@ -395,6 +501,7 @@ class Component extends DCLogic {
       this.setState({ result: rendered, ...(this.state.route === 'editor' && this.state.previewId === clipId ? { route: 'result' } : {}) });
       if (this.state.route !== 'result') this.notify('Your Short is ready. Open the project to download it.');
       await this.loadClips(projectId);
+      if(this.state.route==='result'&&this.state.result?.id===rendered.id) await this.openResult(rendered);
       return result;
     } catch (e) { if (!this.handleAuth(e)) this.setState({ renderError: e.message }); }
     finally { this.setState({ renderingId: null }); }
@@ -601,8 +708,9 @@ class Component extends DCLogic {
       testSummary: tr.length ? (tr.length - failed) + ' passed · ' + failed + ' failed · ' + tr.length + ' of ' + total + ' run' : total + ' tests against the mock backend and HTTP client. Each test builds its own isolated backend with a fake clock.',
       toast: s.toast,
     };
-    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts' };
+    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts', publish: 'Publish Short' };
     Object.assign(values, {
+      publishing: s.publishing, confirmSocialTranscript: value => this.setState(t=>({publishing:{...t.publishing,transcriptConfirmed:value}})), openPublish: result => this.openPublish(result || s.result), editSocialCopy: (p,f,v) => this.editSocialCopy(p,f,v), saveSocialDraft: p => this.saveSocialDraft(p), editPublishSetting: (p,f,v) => this.editPublishSetting(p,f,v), selectPublishPlatform: (p,v) => this.selectPublishPlatform(p,v), generateSocialCopy: p => this.generateSocialCopy(p), publishEverywhere: () => this.publishEverywhere(), retrySocialJob: job => this.retrySocialJob(job), refreshPublish: () => this.loadPublish(s.result,true),
       social: s.social, loadSocialAccounts: () => this.loadSocialAccounts(), connectSocial: platform => this.connectSocial(platform), disconnectSocial: platform => this.disconnectSocial(platform),
       bootError: s.bootError, restoreSession: () => this.restoreSession(), showLogin: () => this.resetSession(),
       route: s.route, pageLabel: labels[s.route], theme: s.theme, email: me?.user.email || '',
@@ -616,7 +724,7 @@ class Component extends DCLogic {
       resolution: s.resolution, setResolution: resolution => this.setState({ resolution }),
       renderingId: s.renderingId, renderError: s.renderError, renderPreview: () => pc && this.renderClip(pc.id),
       sourceExpired: !!project.sourceExpired, result: s.result,
-      openResult: result => this.setState({ result: { ...result, hook: result.hook || cr?.clips.find(c => c.id === result.clipId)?.hook }, route: 'result' }),
+      openResult: result => this.openResult({ ...result, hook: result.hook || cr?.clips.find(c => c.id === result.clipId)?.hook }),
       copy: text => this.copy(text), usageLoading: s.usageLoading, usageError: s.usageError,
       loadUsage: () => this.loadUsage(), usageEntries: s.usageEntries.map(entry => ({
         title: s.projects.find(p => p.id === entry.projectId)?.name || 'Video processing',

@@ -30,6 +30,7 @@ fs.mkdirSync(output, { recursive: true });
       window.SHORTS_CONFIG = { apiBaseUrl };
     }, api);
     const capture = async (name) => {
+      await page.evaluate(() => window.scrollTo({top:0,behavior:"instant"}));
       await page.screenshot({
         path: path.join(output, `${name}.png`),
         fullPage: true,
@@ -214,6 +215,7 @@ fs.mkdirSync(output, { recursive: true });
     const download = await downloading;
     assert.equal(await download.failure(), null);
     assert.match(download.suggestedFilename(), /\.mp4$/);
+    await require("./social-browser-smoke.cjs")(page, api, capture);
     await page.getByRole("tab", { name: "TikTok", exact: true }).click();
     await page
       .getByRole("tab", { name: "TikTok", exact: true })
@@ -352,7 +354,7 @@ fs.mkdirSync(output, { recursive: true });
     await page.getByLabel("Email address").waitFor();
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: login refresh/logout, desktop/mobile/tablet, light/dark, upload → analysis → transcript → regeneration → preview → 720p render → download, URL consent, project search/delete, keyboard tabs/dialog.",
+      "PASS: login refresh/logout, desktop/mobile/tablet, light/dark, upload → analysis → transcript → regeneration → preview → 720p render → download, URL consent, project search/delete, keyboard tabs/dialog, social copy review/editing → explicit publish → partial failure → failed-only retry → success/history.",
     );
     console.log(`Screenshots: ${output}`);
   } finally {
