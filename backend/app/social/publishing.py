@@ -160,6 +160,7 @@ class PublishingService:
                     account.platform_user_id,
                     account.status,
                 )
+            rate_limit(db, user_id, "publish", self.now(), self.accounts.settings.rate_limit)
         # Probe outside transactions. Validate the real file, never request metadata.
         try:
             info = inspect_video(path, self.app_settings.ffmpeg_binary)
@@ -222,7 +223,6 @@ class PublishingService:
                         "This Short already has a publishing job. Check Publishing History.",
                         409,
                     )
-            rate_limit(db, user_id, "publish", self.now(), self.accounts.settings.rate_limit)
             batch = PublishBatch(
                 id=oid("pub"),
                 user_id=user_id,

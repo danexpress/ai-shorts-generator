@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
 from ..errors import ApiError
-from ..social.accounts import safe_error
+from ..social.accounts import rate_limit, safe_error
 from ..social.adapters.base import ProviderError
 from ..social.copy import owned_render
 from ..social.db_models import SocialAccount, SocialCopy
@@ -170,8 +170,14 @@ def tiktok_creator(request: Request, user: SocialUser):
         if not account:
             raise ApiError("NOT_FOUND", "Connect TikTok first.", 404)
         account_id = account.id
+        rate_limit(db, user, "creator_info", service.now(), 30)
     try:
-        return service.adapter("tiktok").creator_info(service.token(account_id, user, "tiktok"))
+        creator = service.adapter("tiktok").creator_info(service.token(account_id, user, "tiktok"))
+        with service.database.transaction() as db:
+            account = db.get(SocialAccount, account_id)
+            if account and account.user_id == user:
+                account.username = creator.get("username") or account.username
+        return creator
     except ProviderError as error:
         raise ApiError(error.code, safe_error(error), 409) from None
 
