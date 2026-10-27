@@ -674,7 +674,9 @@ class Component extends DCLogic {
       startLabel: fmt(c.start), durationLabel: fmt(c.duration), range: fmt(c.start) + ' – ' + fmt(c.end),
       hasVideo: !!projectPreviewUrl, noVideo: !projectPreviewUrl,
       videoUrl: projectPreviewUrl ? projectPreviewUrl + '#t=' + c.start + ',' + c.end : '',
-      scores: [{ label: 'Hook', value: c.scores.hook }, { label: 'Value', value: c.scores.value }, { label: 'Standalone clarity', value: c.scores.standalone }, { label: 'Visual quality', value: c.scores.visual }],
+      // LLM highlights carry one engagement score; the demo analyzer has four sub-scores.
+      scores: c.scores ? [{ label: 'Hook', value: c.scores.hook }, { label: 'Value', value: c.scores.value }, { label: 'Standalone clarity', value: c.scores.standalone }, { label: 'Visual quality', value: c.scores.visual }] : [{ label: 'Engagement', value: c.combined }],
+      signalNote: c.signals ? 'Energy ' + (c.signals.loudnessLu >= 0 ? '+' : '') + c.signals.loudnessLu + ' LU · ' + c.signals.sceneChanges + ' scene change' + (c.signals.sceneChanges === 1 ? '' : 's') : '',
       selected: !!s.selected[c.id], notSelected: !s.selected[c.id],
       isRendering: s.renderingId === c.id, canRender: !!s.selected[c.id],
       renderLabel: s.renderingId === c.id ? 'Rendering MP4…' : 'Render Short (1080p)',
@@ -715,7 +717,7 @@ class Component extends DCLogic {
       id: pc.id, start: pc.start, end: pc.end, rank: pc.rank, hook: pc.hook, reason: pc.reason, range: fmt(pc.start) + ' – ' + fmt(pc.end), duration: fmt(pc.duration),
       hasVideo: !!projectPreviewUrl, noVideo: !projectPreviewUrl,
       videoUrl: projectPreviewUrl ? projectPreviewUrl + '#t=' + pc.start + ',' + pc.end : '',
-      framing: pc.scores.visual >= 80 ? 'face-tracked' : 'stable center', caption: excerpt.split(' ').slice(0, 3).join(' '),
+      framing: 'stable center', caption: excerpt.split(' ').slice(0, 3).join(' '),
       excerpt: excerpt || 'Loading transcript…', selectLabel: s.selected[pc.id] ? 'Unselect' : 'Select this clip',
       select: () => { selectClip(pc.id); this.setState({ previewId: null }); },
     } : {};

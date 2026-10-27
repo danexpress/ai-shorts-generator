@@ -338,6 +338,12 @@ class Scores(BaseModel):
     visual: float = Field(ge=0, le=100)
 
 
+class ClipSignals(BaseModel):
+    loudnessLu: float
+    sceneChanges: int
+    adjustment: float
+
+
 class Clip(BaseModel):
     id: str
     projectId: str
@@ -347,10 +353,13 @@ class Clip(BaseModel):
     end: float
     duration: float
     hook: str
-    scores: Scores
+    # Sub-scores from the demo analyzer; LLM highlights report only `combined`.
+    scores: Scores | None = None
     combined: int
     reason: str
     tags: list[str]
+    # Present when loudness/scene re-ranking (HIGHLIGHT_SIGNALS) adjusted the score.
+    signals: ClipSignals | None = None
 
 
 class Clips(BaseModel):

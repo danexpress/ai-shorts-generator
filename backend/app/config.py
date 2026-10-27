@@ -43,6 +43,32 @@ class Settings:
     whisper_align: str = field(
         default_factory=lambda: os.environ.get("WHISPER_ALIGN", "").strip().lower()
     )
+    # Highlight detection (Claude API). "demo" keeps the built-in demo analyzer.
+    highlight_model: str = field(
+        default_factory=lambda: os.environ.get("HIGHLIGHT_MODEL", "claude-opus-5-5").strip()
+    )
+    highlight_effort: str = field(
+        default_factory=lambda: os.environ.get("HIGHLIGHT_EFFORT", "high").strip().lower()
+    )
+    highlight_candidates: int = field(
+        default_factory=lambda: int(os.environ.get("HIGHLIGHT_CANDIDATES", "3"))
+    )
+    highlight_min_seconds: float = 20
+    highlight_max_seconds: float = 40
+    # Transcripts estimated above this many tokens are split into overlapping windows.
+    highlight_window_tokens: int = field(
+        default_factory=lambda: int(os.environ.get("HIGHLIGHT_WINDOW_TOKENS", "100000"))
+    )
+    # "default" = server-side refusal fallback chosen by Anthropic; "off" disables it.
+    highlight_fallbacks: str = field(
+        default_factory=lambda: os.environ.get("HIGHLIGHT_FALLBACKS", "default").strip().lower()
+    )
+    # Re-rank candidates with audio loudness peaks and scene changes (FFmpeg).
+    highlight_signals: bool = field(
+        default_factory=lambda: (
+            os.environ.get("HIGHLIGHT_SIGNALS", "false").lower() in {"1", "true", "yes"}
+        )
+    )
     job_lease_seconds: int = 300
     token_ttl_seconds: int = 3600
     upload_ttl_seconds: int = 900

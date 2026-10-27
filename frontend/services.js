@@ -43,6 +43,7 @@
     ANALYSIS_FAILED: 'Finding clips failed. Retry — your transcript is kept.',
     CAPTIONS_EDITED: 'Changing filler words rebuilds the captions and replaces your edits.',
     CAPTIONS_UNAVAILABLE: 'Caption editing needs the connected backend.',
+    NO_HIGHLIGHTS: 'We couldn’t find a 20–40 second moment that works as a standalone Short in this video. Try a longer video with more speech.',
     NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
     IMPORT_UNAVAILABLE: 'URL import isn’t available right now. Upload the video file instead.',
     UNSUPPORTED_URL: 'Only public youtube.com or youtu.be video links are supported.',

@@ -1127,6 +1127,7 @@
           ),
         ),
         h("p", { className: "reason" }, clip.reason),
+        clip.signalNote && h("p", { className: "small muted" }, clip.signalNote),
         h(
           "div",
           { className: "scores", "aria-label": "Clip scores" },

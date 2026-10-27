@@ -2158,7 +2158,6 @@ components:
       - end
       - duration
       - hook
-      - scores
       - combined
       - reason
       - tags
@@ -2190,11 +2189,16 @@ components:
           minLength: 1
           maxLength: 80
         scores:
-          $ref: '#/components/schemas/Scores'
+          allOf:
+          - $ref: '#/components/schemas/Scores'
+          nullable: true
+          description: Demo-analyzer sub-scores; null for LLM highlights, which report only combined.
         combined:
           type: integer
           minimum: 0
           maximum: 100
+          description: 'Overall engagement score 0-100 (LLM highlights: the model''s 0-10 score x 10, after optional
+            signal re-ranking).'
         reason:
           type: string
           minLength: 1
@@ -2203,6 +2207,23 @@ components:
           type: array
           items:
             type: string
+        signals:
+          type: object
+          nullable: true
+          description: Present when HIGHLIGHT_SIGNALS re-ranked the clip.
+          required:
+          - loudnessLu
+          - sceneChanges
+          - adjustment
+          properties:
+            loudnessLu:
+              type: number
+              description: Mean momentary loudness vs. the video median, LU.
+            sceneChanges:
+              type: integer
+            adjustment:
+              type: number
+              description: Points added to the 0-10 score.
       description: One continuous source interval, in seconds. Combined score uses configurable hook/value/standalone/visual
         weights, initially 30/30/25/15 percent.
     Clips:

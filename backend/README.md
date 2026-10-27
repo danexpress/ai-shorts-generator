@@ -52,7 +52,7 @@ The frontend uses password sign-in and adds the bearer token automatically. Run 
 
 ## Backend behavior
 
-Uploaded videos are transcribed locally with faster-whisper by the processing worker (see [Transcription](#transcription)). Clip suggestions are still produced by the demo analyzer from that transcript. Selected intervals are actually rendered with FFmpeg, with burned-in word-highlighted captions; face-aware framing and object storage are not implemented. With `PROCESSING_MODE=demo`, transcripts are canned demo content and processing advances when API requests arrive. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
+Uploaded videos are transcribed locally with faster-whisper by the processing worker (see [Transcription](#transcription)). Clip suggestions are the most engaging 20–40 s moments found by Claude in that transcript (see [Highlight detection](#highlight-detection)). Selected intervals are actually rendered with FFmpeg, with burned-in word-highlighted captions; face-aware framing and object storage are not implemented. With `PROCESSING_MODE=demo`, transcripts and suggestions are canned demo content and processing advances when API requests arrive; `HIGHLIGHT_MODEL=demo` keeps real transcription but uses the demo analyzer (no API key needed). Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
 
@@ -86,6 +86,26 @@ To add a preset:
 2. Add a `CaptionPreset(...)` entry to `PRESETS` with a unique `id`, the `font_file`, the font's full name as `font_name` (check it with fontTools: name ID 4), colours as `#RRGGBB`, and sizes in pixels on the 1080×1920 canvas. `position` is the vertical centre of the caption block as a fraction of the height (0.67 sits above the platforms' bottom overlays).
 3. Run `make test`: `test_every_preset_fits_the_safe_zone` checks the font file exists and a worst-case two-line caption stays inside `SAFE_ZONE`. The new preset appears in `GET /v1/caption-presets` and in the editor automatically.
 
+## Highlight detection
+
+The worker's analysis stage sends the stored transcript to the Claude API and stores the answer as the project's suggestions, so the existing **Best moments → Preview → Render** flow is how a creator picks one: the chosen window is cut, center-cropped to 9:16 and captioned (Karaoke captions above). Nothing is re-transcribed.
+
+1. **Prompt** (`app/highlights/prompt.py`): the transcript is sent as sentence lines `[start-end] text`, wrapped in a `<transcript>` block marked as data, followed by the creator's goal, note and topics to avoid. The model returns up to `HIGHLIGHT_CANDIDATES` (3) moments ranked best first, as structured JSON (`output_config.format` with a JSON schema): `{"candidates": [{"start", "end", "hook", "reason", "score"}]}`, score 0–10.
+2. **Validation** (`app/highlights/validate.py`): every candidate is type-checked; timestamps must fall inside the video and the score in 0–10. Start and end are then snapped to sentence boundaries (sentences end at `. ! ?` or a pause of 1 s); length is brought into 20–40 s by adding or dropping whole sentences, falling back to word boundaries only for run-on speech, and a little padding is taken from the surrounding silence. Clips therefore never start or end mid-word. Overlapping candidates keep the higher score. If nothing valid comes back (bad JSON, a refusal, truncation, or only invalid candidates), the request is retried once with the problems listed; a second failure ends the job as `ANALYSIS_FAILED` (retryable).
+3. **Long videos** (`app/highlights/transcript.py`): a transcript estimated above `HIGHLIGHT_WINDOW_TOKENS` is split into windows that overlap by 45 s (longer than any clip, so a moment on a window edge appears whole somewhere). Each window yields candidates; a final request compares all of them side by side and re-ranks them.
+4. **Optional signals** (`HIGHLIGHT_SIGNALS=true`, off by default; `app/highlights/signals.py`): FFmpeg's `ebur128` measures momentary loudness and `scdet` finds scene changes. Each candidate's score moves by at most ±1.25 points for being louder or more visually dynamic than the rest of the video, then candidates are re-sorted. The adjustment is shown on the suggestion card.
+5. **Results and failures**: suggestions show one *Engagement* score (score × 10). A video with too little speech, or where the model finds no usable moment, ends as `NO_HIGHLIGHTS` with an explanation and no retry. Missing credentials, rate limits and outages end as retryable `ANALYSIS_FAILED`; retrying re-runs only analysis.
+6. **Logs**: each request logs model, latency, input/output/cached tokens, stop reason and request ID; each job logs the total calls, tokens and estimated cost (prices in `app/highlights/llm.py`).
+
+Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (default `high`), the transcript as a cached prefix (retries and re-ranking reuse it), and, on models that support it, the server-side refusal fallback (`fallbacks: "default"`; `HIGHLIGHT_FALLBACKS=off` disables it). Credentials come from `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile.
+
+### Changing the model or prompt
+
+- **Model**: set `HIGHLIGHT_MODEL` (default `claude-opus-5-5`; e.g. `claude-sonnet-5-5` is cheaper, `claude-haiku-5-5` cheapest) and restart `make worker`. The model name is saved with every analysis run. Add a new model's prices to `PRICES` in `app/highlights/llm.py` for cost logging (unknown models log tokens only), and to `FALLBACK_MODELS` only if it accepts server-side fallbacks. Tune `HIGHLIGHT_EFFORT` alongside the model: lower effort is faster and cheaper.
+- **Prompt**: edit `SYSTEM`, `GUIDANCE`, `RETRY` or `RERANK_SYSTEM` in `app/highlights/prompt.py`, keeping the `{min_seconds}`, `{max_seconds}` and `{count}` placeholders and the output schema in sync with `parse_candidates`. Bump `PROMPT_VERSION`; it is stored with each run (shown as *prompt* in the suggestions footer) so results can be traced to the prompt that produced them.
+- **Clip length / count**: `highlight_min_seconds` / `highlight_max_seconds` in `app/config.py` and `HIGHLIGHT_CANDIDATES`; the prompt and validation both read them.
+- Run `make test` afterwards: `tests/test_highlights.py` covers validation, snapping, retries, windowing, signals and the request shape with a mocked LLM.
+
 ## Modules and checks
 
 - `app/database.py`: configurable engine and request transactions; SQLite options only.
@@ -95,11 +115,12 @@ To add a preset:
 - `app/renderer.py`: FFmpeg vertical MP4 rendering.
 - `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
 - `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
+- `app/highlights/`: Claude prompt and client, candidate validation and sentence snapping, transcript windows, optional loudness/scene signals.
 - `app/captions/`: chunking, presets, glyph measurement, ASS/SRT writers and caption-track service; `app/routers/captions.py` exposes presets and per-clip tracks.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 
-Run `make test` and `make lint` from the repository root. Worker and transcription tests use a fake transcriber; Whisper never runs in the test suite. Tests cover the existing and social routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
+Run `make test` and `make lint` from the repository root. Worker and transcription tests use a fake transcriber and highlight tests a mocked LLM; neither Whisper nor the Claude API runs in the test suite. Tests cover the existing and social routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
 
 ## Social publishing
 

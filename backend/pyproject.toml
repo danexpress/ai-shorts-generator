@@ -16,6 +16,7 @@ dependencies = [
   "faster-whisper>=1.1,<2",
   "av>=12,<16",
   "fonttools>=4.50,<5",
+  "anthropic>=1,<2",
 ]
 
 [project.optional-dependencies]

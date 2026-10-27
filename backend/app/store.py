@@ -35,7 +35,7 @@ from .models import Guidance, Project, UploadRequest
 
 DAY = 86_400_000
 # Failures where retrying the same source cannot help.
-NON_RETRYABLE = {"NO_SPEECH"}
+NON_RETRYABLE = {"NO_SPEECH", "NO_HIGHLIGHTS"}
 
 
 def oid(prefix: str) -> str:
@@ -383,19 +383,27 @@ class Store:
         candidates.sort(key=lambda c: c["_rank"], reverse=True)
         duration = p.durationSec
         count = 3 if duration < 600 else 5 if duration < 1200 else 7 if duration < 2400 else 10
-        run_id = oid("run")
         clips = candidates[:count]
-        for rank, clip in enumerate(clips, 1):
+        for clip in clips:
             clip.pop("_rank")
-            clip.update(rank=rank, runId=run_id)
+        self.save_run(p, params, clips, "demo-v1", "demo-simulator")
+
+    def save_run(
+        self, p: ProjectRecord, params: dict, clips: list[dict], prompt_version: str, model: str
+    ):
+        """Store ranked clips as the project's current analysis run."""
+        run_id = oid("run")
+        for rank, clip in enumerate(clips, 1):
+            clip.update(rank=rank, runId=run_id, projectId=p.id)
+            clip.setdefault("id", oid("clp"))
         self.db.add(
             AnalysisRunRecord(
                 projectId=p.id,
                 runId=run_id,
                 **params,
                 stale=False,
-                promptVersion="demo-v1",
-                modelName="demo-simulator",
+                promptVersion=prompt_version,
+                modelName=model,
                 clips=clips,
             )
         )

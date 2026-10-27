@@ -15,6 +15,15 @@ from sqlalchemy import or_, select
 from ..config import Settings
 from ..database import Database
 from ..db_models import JobRecord, ProjectRecord, TranscriptRecord, UploadRecord
+from ..highlights import (
+    PROMPT_VERSION,
+    HighlightFailed,
+    HighlightUnavailable,
+    NoHighlights,
+    build_model,
+    find_highlights,
+)
+from ..renderer import RendererUnavailable, ffmpeg_path
 from ..store import Store, oid
 from ..transcription import (
     TranscriptionError,
@@ -32,9 +41,11 @@ class Abandoned(Exception):
 
 
 class ProcessingWorker:
-    def __init__(self, database, settings, transcriber=None, clock=time.time):
+    def __init__(self, database, settings, transcriber=None, clock=time.time, highlight_model=None):
         self.database, self.settings, self.clock = database, settings, clock
         self._transcriber = transcriber
+        # Factory for a fresh highlight model per job (usage is tracked per job).
+        self.highlight_model = highlight_model or (lambda: build_model(settings))
         self.owner = oid("pworker")[:40]
         self.heartbeat_seconds = 15
 
@@ -171,6 +182,68 @@ class ProcessingWorker:
         )
 
     def analyze(self, job_id):
+        if self.settings.highlight_model == "demo":
+            return self.demo_analyze(job_id)
+        started = time.monotonic()
+        with self.database.transaction() as db:
+            job = self.owned_job(db, job_id, "analyzing")
+            p = db.get(ProjectRecord, job.projectId)
+            transcript = db.get(TranscriptRecord, p.id)
+            segments, params, duration = transcript.segments, dict(job.params), p.durationSec
+            upload = db.scalar(select(UploadRecord).where(UploadRecord.projectId == p.id))
+            source = upload.storedName if upload else None
+        llm = self.highlight_model()
+        try:
+            signals = self.signals(source) if self.settings.highlight_signals else None
+            highlights = find_highlights(segments, duration, params, llm, self.settings, signals)
+        except NoHighlights as exc:
+            logger.info("Job %s has no highlights: %s", job_id, exc)
+            return self.fail(job_id, "analyzing", "NO_HIGHLIGHTS")
+        except (HighlightFailed, HighlightUnavailable) as exc:
+            logger.warning("Highlight detection failed for job %s: %s", job_id, exc)
+            return self.fail(job_id, "analyzing", "ANALYSIS_FAILED")
+        clips = [
+            {
+                "start": h["start"],
+                "end": h["end"],
+                "duration": round(h["end"] - h["start"], 1),
+                "hook": h["hook"],
+                "scores": None,
+                "combined": round(h["score"] * 10),
+                "reason": h["reason"],
+                "tags": [],
+                **({"signals": h["signals"]} if "signals" in h else {}),
+            }
+            for h in highlights
+        ]
+        with self.database.transaction() as db:
+            job = self.owned_job(db, job_id, "analyzing")
+            p = db.get(ProjectRecord, job.projectId)
+            store = self.store(db)
+            store.save_run(p, params, clips, PROMPT_VERSION, self.settings.highlight_model)
+            store.stage_done(job, p, self.now())
+        logger.info(
+            "Job %s analyzed in %.1fs: %d highlight(s); LLM %s",
+            job_id,
+            time.monotonic() - started,
+            len(clips),
+            llm.usage.summary() if hasattr(llm, "usage") else "n/a",
+        )
+
+    def signals(self, stored_name):
+        from ..highlights.signals import extract
+
+        root = (self.settings.media_dir / "sources").resolve()
+        source = (root / stored_name).resolve() if stored_name else None
+        if source is None or source.parent != root or not source.is_file():
+            return None
+        try:
+            return extract(source, ffmpeg_path(self.settings.ffmpeg_binary))
+        except (RendererUnavailable, OSError):
+            logger.warning("Signals unavailable; ranking by transcript only")
+            return None
+
+    def demo_analyze(self, job_id):
         started = time.monotonic()
         try:
             with self.database.transaction() as db:

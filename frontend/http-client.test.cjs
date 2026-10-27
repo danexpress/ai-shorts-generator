@@ -668,3 +668,17 @@ test('editor loads captions, commits text on blur, saves edits before rendering'
   assert.equal(JSON.stringify(render), JSON.stringify(['render', 'p1', { clipId: 'c1', resolution: 1080, captions: true, framing: 'fit' }]));
   assert.equal(page.state.captions.dirty, false);
 });
+
+test('LLM highlights without sub-scores show one engagement score and signal note', (t) => {
+  const page = component(S);
+  t.after(() => page.componentWillUnmount());
+  page.setState({ me: session, projectId: 'p1', clipsRes: { clips: [
+    { id: 'c1', rank: 1, start: 4, end: 30, duration: 26, hook: 'Hook', reason: 'Why', combined: 87, scores: null, signals: { loudnessLu: 2.4, sceneChanges: 1, adjustment: 0.6 } },
+    { id: 'c2', rank: 2, start: 40, end: 70, duration: 30, hook: 'Demo', reason: 'Why', combined: 80, scores: { hook: 90, value: 80, standalone: 85, visual: 70 } },
+  ] } });
+  const [llm, demo] = page.renderVals().clips;
+  assert.equal(JSON.stringify(llm.scores), JSON.stringify([{ label: 'Engagement', value: 87 }]));
+  assert.equal(llm.signalNote, 'Energy +2.4 LU · 1 scene change');
+  assert.equal(demo.scores.length, 4);
+  assert.equal(demo.signalNote, '');
+});

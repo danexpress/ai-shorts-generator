@@ -54,7 +54,8 @@ class FakeTranscriber:
 
 @pytest.fixture
 def local_settings(settings):
-    return dataclasses.replace(settings, processing_mode="local")
+    # Transcription tests keep the demo analyzer; test_highlights covers the LLM path.
+    return dataclasses.replace(settings, processing_mode="local", highlight_model="demo")
 
 
 @pytest.fixture
