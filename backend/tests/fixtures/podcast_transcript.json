@@ -1,0 +1,48 @@
+{
+  "language": "en",
+  "revision": 1,
+  "segments": [
+    {
+      "id": "seg_0", "start": 10.0, "end": 13.9, "text": "So, um, most founders hire backwards, right?", "timing": "word",
+      "words": [
+        {"w": "So,", "s": 10.0, "e": 10.25},
+        {"w": "um,", "s": 10.3, "e": 10.6},
+        {"w": "most", "s": 10.7, "e": 10.95},
+        {"w": "founders", "s": 10.95, "e": 11.4},
+        {"w": "hire", "s": 11.4, "e": 11.65},
+        {"w": "backwards,", "s": 11.65, "e": 12.3},
+        {"w": "right?", "s": 12.35, "e": 12.6}
+      ]
+    },
+    {
+      "id": "seg_1", "start": 13.5, "end": 17.8, "text": "They hire uh for the work they have today and not tomorrow.", "timing": "word",
+      "words": [
+        {"w": "They", "s": 13.5, "e": 13.7},
+        {"w": "hire", "s": 13.7, "e": 13.95},
+        {"w": "uh", "s": 13.95, "e": 14.2},
+        {"w": "for", "s": 14.2, "e": 14.3},
+        {"w": "the", "s": 14.3, "e": 14.38},
+        {"w": "work", "s": 14.38, "e": 14.6},
+        {"w": "they", "s": 14.6, "e": 14.75},
+        {"w": "have", "s": 14.75, "e": 14.95},
+        {"w": "today", "s": 14.95, "e": 15.4},
+        {"w": "and", "s": 16.2, "e": 16.35},
+        {"w": "not", "s": 16.35, "e": 16.6},
+        {"w": "tomorrow.", "s": 16.6, "e": 17.2}
+      ]
+    },
+    {
+      "id": "seg_2", "start": 17.9, "end": 19.4, "text": "Internationalization matters.", "timing": "word",
+      "words": [
+        {"w": "Internationalization", "s": 17.9, "e": 18.9},
+        {"w": "matters.", "s": 18.9, "e": 19.0}
+      ]
+    },
+    {
+      "id": "seg_3", "start": 20.0, "end": 22.0, "text": "Write the decisions down first.", "timing": "segment",
+      "words": [
+        {"w": "Write the decisions down first.", "s": 20.0, "e": 22.0}
+      ]
+    }
+  ]
+}

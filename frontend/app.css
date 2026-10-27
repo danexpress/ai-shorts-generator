@@ -1854,3 +1854,98 @@ details[open] > summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- captions ---------- */
+@font-face {
+  font-family: "Montserrat";
+  font-weight: 600;
+  src: url("fonts/Montserrat-SemiBold.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Montserrat";
+  font-weight: 800;
+  src: url("fonts/Montserrat-ExtraBold.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Montserrat";
+  font-weight: 900;
+  src: url("fonts/Montserrat-Black.ttf") format("truetype");
+  font-display: swap;
+}
+.video-preview {
+  container-type: inline-size;
+}
+.video-preview.is-cropped video {
+  object-fit: cover;
+}
+.caption-overlay {
+  position: absolute;
+  left: 50%;
+  width: max-content;
+  transform: translate(-50%, -50%);
+  font-family: "Montserrat", var(--font-sans, system-ui), sans-serif;
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.caption-word + .caption-word {
+  margin-left: 0.25em;
+}
+.caption-sample {
+  font-family: "Montserrat", var(--font-sans, system-ui), sans-serif;
+  font-size: 13px;
+  background: #3b3f8f;
+}
+.preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.preset:disabled {
+  cursor: progress;
+}
+.notice.column {
+  flex-direction: column;
+}
+.notice.column .btn {
+  margin-top: 0;
+}
+.caption-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.caption-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+}
+.caption-row input {
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.caption-time {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Keep Render reachable while the caption editor makes the panel tall. */
+@media (min-width: 641px) {
+  .editor-controls .render-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-inline: calc(-1 * var(--s5));
+    padding: var(--s3) var(--s5) var(--s4);
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+  }
+}

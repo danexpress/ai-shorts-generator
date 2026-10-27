@@ -113,6 +113,25 @@ class RenderRecord(Base):
     sizeBytes: Mapped[int] = mapped_column("size_bytes", BigInteger)
     createdAt: Mapped[int] = mapped_column("created_at", BigInteger, index=True)
     expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger, index=True)
+    framing: Mapped[str | None] = mapped_column(String(10))
+    # Snapshot of the burned-in captions ({preset, clipStart, chunks}) for SRT/ASS export.
+    captions: Mapped[dict | None] = mapped_column(JSON)
+
+
+class CaptionTrackRecord(Base):
+    """Creator-edited captions for one suggested clip; absent until first saved."""
+
+    __tablename__ = "caption_tracks"
+    projectId: Mapped[str] = mapped_column(
+        "project_id", ForeignKey("projects.id"), primary_key=True
+    )
+    clipId: Mapped[str] = mapped_column("clip_id", String(40), primary_key=True)
+    preset: Mapped[str] = mapped_column(String(40))
+    keepFillers: Mapped[bool] = mapped_column("keep_fillers", Boolean)
+    edited: Mapped[bool] = mapped_column(Boolean)
+    transcriptRevision: Mapped[int] = mapped_column("transcript_revision", Integer)
+    chunks: Mapped[list] = mapped_column(JSON)
+    updatedAt: Mapped[int] = mapped_column("updated_at", BigInteger)
 
 
 class TranscriptRecord(Base):

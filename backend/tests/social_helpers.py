@@ -66,7 +66,7 @@ def callback(client, state, binding, platform="youtube", **params):
 def render(client, headers, clock, monkeypatch):
     from app.routers import renders
 
-    def fake(source, destination, *args):
+    def fake(source, destination, *args, **options):
         destination.write_bytes(b"video")
 
     monkeypatch.setattr(renders, "render_short", fake)

@@ -1320,19 +1320,107 @@
         ),
     );
   }
-  function VideoPreview({ url, label = "Video preview", end, start = 0 }) {
+  const FONT_WEIGHTS = { SemiBold: 600, Bold: 700, ExtraBold: 800, Black: 900 };
+  // Live karaoke preview: follows the video clock every animation frame and only
+  // re-renders when the active chunk or word changes.
+  function CaptionOverlay({ videoRef, chunks, style }) {
+    const [active, setActive] = root.React.useState({ chunk: -1, word: -1 });
+    const [fit, setFit] = root.React.useState(1);
+    const box = root.React.useRef(null);
+    // Like the renderer, shrink a chunk whose widest line leaves the safe width.
+    root.React.useLayoutEffect(() => {
+      const el = box.current;
+      if (!el || !el.parentElement) return;
+      const limit = el.parentElement.clientWidth * (style.max_width || 0.69);
+      const widest = Math.max(...[...el.children].map((line) => line.scrollWidth));
+      // scrollWidth ignores the current transform, so this is the unscaled width.
+      const next = widest > 0 ? Math.min(1, limit / widest) : 1;
+      if (Math.abs(next - fit) > 0.01) setFit(next);
+    }, [active.chunk, style]);
+    root.React.useEffect(() => {
+      let frame;
+      const tick = () => {
+        const t = videoRef.current ? videoRef.current.currentTime : -1;
+        const chunk = chunks.findIndex((c) => t >= c.words[0].start && t < Math.max(c.end || 0, c.words[c.words.length - 1].end));
+        let word = -1;
+        if (chunk >= 0) {
+          const words = chunks[chunk].words;
+          word = words.length - 1;
+          for (let i = 1; i < words.length; i++) if (t < words[i].start) { word = i - 1; break; }
+        }
+        setActive((a) => (a.chunk === chunk && a.word === word ? a : { chunk, word }));
+        frame = root.requestAnimationFrame(tick);
+      };
+      frame = root.requestAnimationFrame(tick);
+      return () => root.cancelAnimationFrame(frame);
+    }, [videoRef, chunks]);
+    if (!style || active.chunk < 0 || !chunks[active.chunk]) return null;
+    const words = chunks[active.chunk].words.map((w) => (style.uppercase ? w.text.toUpperCase() : w.text));
+    const lines = root.ShortsServices.captionLines(words);
+    const weight = FONT_WEIGHTS[style.font_name.split(" ").pop()] || 800;
+    // Approximate the libass outline with a ring of hard text shadows (in cqw units).
+    const o = (style.outline / 1080) * 100;
+    const ring = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]
+      .map(([x, y]) => `${(x * o).toFixed(3)}cqw ${(y * o).toFixed(3)}cqw 0 ${style.outline_color}`)
+      .join(",");
+    let index = -1;
+    return h(
+      "div",
+      {
+        ref: box,
+        className: "caption-overlay",
+        "aria-hidden": "true",
+        style: {
+          top: style.position * 100 + "%",
+          transform: `translate(-50%, -50%) scale(${fit})`,
+          fontWeight: weight,
+          fontSize: ((style.css_font_size || style.font_size * 0.82) / 1080) * 100 + "cqw",
+          lineHeight: style.line_height,
+          color: style.text_color,
+          textShadow: ring,
+        },
+      },
+      lines.map((line, n) =>
+        h(
+          "div",
+          { key: n },
+          line.map((text) => {
+            index += 1;
+            const state = index === active.word ? "active" : index > active.word ? "upcoming" : "spoken";
+            return h(
+              "span",
+              {
+                key: index,
+                className: "caption-word",
+                style:
+                  state === "active"
+                    ? { color: style.active_color, fontSize: `${style.active_scale / 100}em` }
+                    : state === "upcoming"
+                      ? { opacity: style.inactive_opacity }
+                      : undefined,
+              },
+              text,
+            );
+          }),
+        ),
+      ),
+    );
+  }
+  function VideoPreview({ url, label = "Video preview", end, start = 0, framing, captions }) {
     const [failed, setFailed] = root.React.useState(false);
     const [ready, setReady] = root.React.useState(false);
+    const videoRef = root.React.useRef(null);
     root.React.useEffect(() => {
       setFailed(false);
       setReady(false);
     }, [url]);
     return h(
       "div",
-      { className: "video-preview" },
+      { className: "video-preview" + (framing === "crop" ? " is-cropped" : "") },
       url && !failed
         ? h("video", {
             key: url,
+            ref: videoRef,
             src: url,
             controls: true,
             playsInline: true,
@@ -1385,27 +1473,128 @@
           h(Icon, { name: "video" }),
           h("span", null, "Loading preview…"),
         ),
+      url &&
+        !failed &&
+        captions &&
+        captions.chunks.length > 0 &&
+        h(CaptionOverlay, { videoRef, chunks: captions.chunks, style: captions.style }),
     );
   }
-  function CaptionPresetCard({ label, kind }) {
+  function CaptionPresetCard({ preset, disabled }) {
+    const st = preset.style;
+    const word = (text, active) =>
+      h(
+        "span",
+        {
+          style: active
+            ? { color: st.active_color, fontSize: `${st.active_scale / 100}em` }
+            : { opacity: st.inactive_opacity },
+        },
+        st.uppercase ? text.toUpperCase() : text,
+      );
     return h(
       "button",
       {
         type: "button",
-        disabled: true,
         className: "preset",
-        "aria-label": `${label} caption style — not available yet`,
+        "aria-pressed": String(!!preset.pressed),
+        title: preset.description,
+        disabled,
+        onClick: preset.pick,
       },
       h(
         "div",
-        { className: "preset-art" },
-        kind === "bold"
-          ? h("strong", null, "YOUR NEXT IDEA")
-          : kind === "highlight"
-            ? h("span", null, "Your next ", h("em", null, "idea"))
-            : h("span", null, "Your next idea"),
+        {
+          className: "preset-art caption-sample",
+          style: {
+            fontWeight: FONT_WEIGHTS[st.font_name.split(" ").pop()] || 800,
+            color: st.text_color,
+            textShadow: `0 0 ${Math.min(3, st.outline / 2)}px ${st.outline_color}, 0 0 1px ${st.outline_color}`,
+          },
+        },
+        h("span", null, word("Your", false), " ", word("next", true), " ", word("idea", false)),
       ),
-      h("span", null, label),
+      h("span", null, preset.label),
+    );
+  }
+  function CaptionEditor({ c, busy }) {
+    if (c.loading) return h("p", { className: "small muted", role: "status" }, "Loading captions…");
+    if (c.error && !c.ready)
+      return h(ErrorState, { title: "Captions are unavailable.", message: c.error, retry: c.retry });
+    if (!c.ready) return null;
+    const locked = busy || c.saving;
+    return h(
+      "div",
+      { className: "stack compact-stack" },
+      h(
+        "div",
+        { className: "field" },
+        h("span", { className: "field-label" }, "Caption style"),
+        h(
+          "div",
+          { className: "preset-grid" },
+          c.presets.map((preset) => h(CaptionPresetCard, { key: preset.id, preset, disabled: locked })),
+        ),
+      ),
+      h(
+        "label",
+        { className: "check" },
+        h("input", { type: "checkbox", checked: !c.keepFillers, onChange: c.toggleFillers, disabled: locked }),
+        h("span", null, "Remove filler words (um, uh)"),
+      ),
+      c.confirmReset &&
+        h(
+          "div",
+          { className: "notice column", role: "alert" },
+          h("p", { className: "small" }, "Changing filler words rebuilds the captions and replaces your edits."),
+          h(
+            "div",
+            { className: "row" },
+            h(Button, { small: true, primary: true, onClick: c.confirmFillerReset, disabled: locked }, "Rebuild captions"),
+            h(Button, { small: true, ghost: true, onClick: c.cancelReset }, "Keep edits"),
+          ),
+        ),
+      c.stale &&
+        h(
+          "p",
+          { className: "notice" },
+          "The transcript changed after these captions were edited. Reset to rebuild them from the corrected transcript.",
+        ),
+      c.noSpeech
+        ? h("p", { className: "small muted" }, "No speech in this clip, so it renders without captions.")
+        : h(
+            "ol",
+            { className: "caption-rows", "aria-label": "Caption lines" },
+            c.rows.map((row) =>
+              h(
+                "li",
+                { key: row.key, className: "caption-row" },
+                h("span", { className: "caption-time" }, row.time, row.estimated ? " ~" : ""),
+                h("input", {
+                  value: row.text,
+                  onChange: row.type,
+                  onBlur: row.commit,
+                  onKeyDown: (e) => e.key === "Enter" && e.currentTarget.blur(),
+                  disabled: locked,
+                  "aria-label": `Caption ${row.index + 1} text`,
+                  title: row.estimated ? "Word timing estimated after an edit" : undefined,
+                }),
+                h(Button, { small: true, ghost: true, onClick: row.earlier, disabled: locked, "aria-label": `Move caption ${row.index + 1} earlier` }, "−0.1s"),
+                h(Button, { small: true, ghost: true, onClick: row.later, disabled: locked, "aria-label": `Move caption ${row.index + 1} later` }, "+0.1s"),
+              ),
+            ),
+          ),
+      c.error && h("p", { className: "notice error", role: "alert" }, c.error),
+      h(
+        "div",
+        { className: "row between" },
+        h(Button, { small: true, ghost: true, onClick: c.reset, disabled: locked || !c.edited }, "Reset to transcript"),
+        h(
+          Button,
+          { small: true, onClick: c.save, disabled: locked || !c.dirty },
+          c.saving ? "Saving…" : c.dirty ? "Save captions" : "Saved",
+        ),
+      ),
     );
   }
   function Editor({ v }) {
@@ -1433,13 +1622,19 @@
             label: pv.hook,
             start: pv.start,
             end: pv.end,
+            framing: v.captions.framing,
+            captions: v.captions.enabled ? v.captions : null,
           }),
           h(
             "p",
             { className: "preview-foot" },
             `${pv.range || ""} · ${pv.duration || ""} clip`,
           ),
-          h("p", { className: "preview-foot" }, "Fits the whole video · 9:16"),
+          h(
+            "p",
+            { className: "preview-foot" },
+            v.captions.framing === "crop" ? "Center crop · 9:16" : "Fits the whole video · 9:16",
+          ),
           pv.reason &&
             h(
               "div",
@@ -1479,6 +1674,34 @@
               { className: "small muted" },
               "A starting point for your title or caption.",
             ),
+          ),
+          h(
+            "section",
+            { className: "stack compact-stack" },
+            h(
+              "div",
+              { className: "row between" },
+              h("h2", null, "Captions"),
+              h(
+                "label",
+                { className: "check" },
+                h("input", {
+                  type: "checkbox",
+                  checked: v.captions.enabled,
+                  onChange: v.captions.toggleEnabled,
+                  disabled: !!v.renderingId,
+                }),
+                h("span", { className: "small" }, "Burn in"),
+              ),
+            ),
+            v.captions.enabled &&
+              h(CaptionEditor, { c: v.captions, busy: !!v.renderingId }),
+          ),
+          h(
+            "section",
+            { className: "field" },
+            h("h2", null, "Framing"),
+            h(Segments, { label: "Framing", items: v.captions.framings }),
           ),
           h(
             "section",
@@ -1539,7 +1762,7 @@
             h(
               "summary",
               null,
-              h("span", null, "Captions & branding"),
+              h("span", null, "Branding"),
               h("span", { className: "badge" }, "Coming soon"),
             ),
             h(
@@ -1548,22 +1771,7 @@
               h(
                 "p",
                 { className: "small muted" },
-                "Text overlays, caption styles, and creator watermarks aren’t available yet.",
-              ),
-              h(
-                "div",
-                { className: "field" },
-                h("span", { className: "field-label" }, "Caption style"),
-                h(
-                  "div",
-                  { className: "preset-grid" },
-                  h(CaptionPresetCard, { label: "Clean", kind: "clean" }),
-                  h(CaptionPresetCard, { label: "Bold", kind: "bold" }),
-                  h(CaptionPresetCard, {
-                    label: "Highlight",
-                    kind: "highlight",
-                  }),
-                ),
+                "Text overlays and creator watermarks aren’t available yet.",
               ),
               h(
                 Field,
@@ -1636,32 +1844,29 @@
             h(
               "details",
               { className: "additional-downloads" },
-              h(
-                "summary",
-                null,
-                h("span", null, "Cover & subtitle files"),
-                h("span", { className: "badge" }, "Coming soon"),
-              ),
+              h("summary", null, h("span", null, "Subtitle files")),
               h(
                 "div",
                 { className: "download-grid" },
-                ["Cover", "SRT", "ASS"].map((kind) =>
+                (v.captionFiles[r.id] || []).map((file) =>
                   h(
-                    Button,
+                    "a",
                     {
-                      key: kind,
-                      disabled: true,
-                      small: true,
-                      title: "Not available yet",
+                      key: file.kind,
+                      className: "btn sm",
+                      href: file.url,
+                      download: file.filename,
                     },
-                    `Download ${kind}`,
+                    `Download ${file.kind.toUpperCase()}`,
                   ),
                 ),
               ),
               h(
                 "p",
                 { className: "small muted mt-2" },
-                "Cover and subtitle downloads aren’t available yet.",
+                (v.captionFiles[r.id] || []).length
+                  ? "SRT is plain subtitles for any platform; ASS keeps the word highlighting."
+                  : "This Short was rendered without captions.",
               ),
             ),
           ),

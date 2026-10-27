@@ -7,6 +7,8 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from ..auth import StoreDep, UserDep
+from ..captions.presets import FONTS_DIR, PRESETS
+from ..captions.service import render_captions, track_view
 from ..db_models import RenderRecord, UploadRecord
 from ..errors import ApiError
 from ..models import RenderedClip, RenderRequest
@@ -33,6 +35,14 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
     clip = next((item for item in clips if item["id"] == body.clipId), None)
     if not clip:
         raise ApiError("INVALID_INPUT", "Choose a clip from the current suggestions.", 422)
+    if body.captionPreset is not None and body.captionPreset not in PRESETS:
+        raise ApiError("INVALID_INPUT", "Choose one of the available caption styles.", 422)
+    # Captions come from the saved/derived track, never from a new transcription.
+    captions = (
+        render_captions(track_view(store, project, clip), body.captionPreset)
+        if (body.captions)
+        else None
+    )
 
     render_id = "rnd_" + uuid.uuid4().hex
     render_root = (store.settings.media_dir / "renders").resolve()
@@ -48,6 +58,9 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
             clip["duration"],
             body.resolution,
             store.settings.ffmpeg_binary,
+            framing=body.framing,
+            captions_ass=captions[0] if captions else None,
+            fonts_dir=FONTS_DIR,
         )
         temporary.replace(destination)
     except RendererUnavailable:
@@ -76,6 +89,8 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
         sizeBytes=destination.stat().st_size,
         createdAt=now,
         expiresAt=expires_at,
+        framing=body.framing,
+        captions=captions[1] if captions else None,
     )
     store.db.add(record)
     store.db.flush()
@@ -99,4 +114,7 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
         "expiresAt": expires_at,
         "url": base_url,
         "downloadUrl": base_url + "&download=true",
+        "framing": body.framing,
+        "captions": captions is not None,
+        "captionPreset": captions[1]["preset"] if captions else None,
     }

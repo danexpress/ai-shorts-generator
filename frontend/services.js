@@ -41,6 +41,8 @@
     MEDIA_PROBE_FAILED: 'We couldn’t read this video. Re-export it and try again.',
     TRANSCRIPTION_FAILED: 'Transcription failed. Retry — your upload is kept.',
     ANALYSIS_FAILED: 'Finding clips failed. Retry — your transcript is kept.',
+    CAPTIONS_EDITED: 'Changing filler words rebuilds the captions and replaces your edits.',
+    CAPTIONS_UNAVAILABLE: 'Caption editing needs the connected backend.',
     NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
     IMPORT_UNAVAILABLE: 'URL import isn’t available right now. Upload the video file instead.',
     UNSUPPORTED_URL: 'Only public youtube.com or youtu.be video links are supported.',
@@ -71,8 +73,11 @@
     }
   }
 
-  // [method, HTTP verb, path]. {id} = first positional argument.
+  // [method, HTTP verb, path]. Each {param} takes the next positional argument, in order.
   const ENDPOINTS = [
+    ['listCaptionPresets', 'GET', '/v1/caption-presets'],
+    ['getCaptions', 'GET', '/v1/projects/{id}/clips/{clipId}/captions'],
+    ['saveCaptions', 'PATCH', '/v1/projects/{id}/clips/{clipId}/captions'],
     ['getSocialCopy', 'GET', '/v1/renders/{id}/social-copy'],
     ['generateSocialCopy', 'POST', '/v1/renders/{id}/social-copy'],
     ['regenerateSocialCopy', 'POST', '/v1/renders/{id}/social-copy/regenerate'],
@@ -112,6 +117,70 @@
   const API_METHODS = ENDPOINTS.map((e) => e[0]);
 
   /* ---------- pure helpers (shared, tested) ---------- */
+
+  // Mirrors backend captions.chunking.layout: fewest balanced lines, words never split.
+  function captionLines(texts, maxChars = 15, maxLines = 2) {
+    if (!texts.length) return [];
+    for (let count = 1; count <= Math.min(maxLines, texts.length); count++) {
+      let best = null;
+      const visit = (start, lines) => {
+        if (lines.length === count - 1) {
+          const all = [...lines, texts.slice(start)];
+          const lengths = all.map((line) => line.join(' ').length);
+          if (all.some((line, i) => lengths[i] > maxChars && line.length > 1)) return;
+          const score = Math.max(...lengths);
+          if (!best || score < best.score) best = { score, lines: all };
+          return;
+        }
+        for (let cut = start + 1; cut < texts.length; cut++) visit(cut, [...lines, texts.slice(start, cut)]);
+      };
+      visit(0, []);
+      if (best) return best.lines;
+    }
+    // Overlong edited text: wrap greedily.
+    const lines = [[]];
+    for (const t of texts) {
+      const line = lines[lines.length - 1];
+      if (line.length && [...line, t].join(' ').length > maxChars) lines.push([t]); else line.push(t);
+    }
+    return lines;
+  }
+
+  // Replace a caption chunk's text. Same word count keeps real word timing; otherwise
+  // words share the chunk's span by length and are marked estimated (never invented
+  // outside the original span).
+  function retimeCaptionText(chunk, text) {
+    const tokens = text.split(/\s+/).filter(Boolean).map((t) => t.slice(0, 40));
+    if (!tokens.length) return null;
+    if (tokens.length === chunk.words.length) return { ...chunk, words: chunk.words.map((w, i) => ({ ...w, text: tokens[i] })) };
+    const start = chunk.words[0].start, end = chunk.words[chunk.words.length - 1].end;
+    const total = tokens.reduce((n, t) => n + t.length, 0);
+    let cursor = start;
+    const words = tokens.map((t) => {
+      const w = { text: t, start: round3(cursor), end: round3(cursor + (end - start) * t.length / total), estimated: true };
+      cursor = w.end;
+      return w;
+    });
+    words[words.length - 1].end = end;
+    return { ...chunk, words };
+  }
+
+  // Shift one chunk's words by delta seconds without crossing its neighbours or the clip.
+  // Returns { chunks, moved } where moved is the delta actually applied.
+  function nudgeCaption(chunks, index, delta, clipStart, clipEnd) {
+    const chunk = chunks[index];
+    const first = chunk.words[0], last = chunk.words[chunk.words.length - 1];
+    const floor = index > 0 ? chunks[index - 1].words[chunks[index - 1].words.length - 1].end : clipStart;
+    const ceiling = index + 1 < chunks.length ? chunks[index + 1].words[0].start : clipEnd;
+    const moved = round3(delta > 0 ? Math.min(delta, ceiling - last.end) : Math.max(delta, floor - first.start));
+    if (Math.abs(moved) < 0.001) return { chunks, moved: 0 };
+    const words = chunk.words.map((w) => ({ ...w, start: round3(w.start + moved), end: round3(w.end + moved) }));
+    const next = chunks.slice();
+    next[index] = { ...chunk, words, start: words[0].start, end: words[words.length - 1].end };
+    return { chunks: next, moved };
+  }
+
+  function round3(n) { return Math.round(n * 1000) / 1000; }
 
   function suggestionCount(durationSec) {
     const m = durationSec / 60;
@@ -219,12 +288,10 @@
     } catch (_) { clearSession(); }
     const api = {};
     for (const [name, verb, path] of ENDPOINTS) {
-      const hasId = path.includes('{id}');
       api[name] = async (...args) => {
-        const id = hasId ? args.shift() : null;
+        const url = origin + path.replace(/\{\w+\}/g, () => encodeURIComponent(args.shift()));
         const body = args[0];
         const opts = args[1] || {};
-        const url = origin + (hasId ? path.replace('{id}', encodeURIComponent(id)) : path);
         if (expiresAt !== null && expiresAt <= Date.now()) { sessionGeneration++; clearSession(); }
         if (name === 'signIn' || name === 'signOut') sessionGeneration++;
         const requestGeneration = sessionGeneration;
@@ -276,6 +343,10 @@
     }
     return api;
   }
+
+  const CAPTION_PRESETS = [
+    { id: 'clean-bold', label: 'Clean Bold', description: 'White ExtraBold words with a thick outline; the spoken word turns yellow.', style: { font_name: 'Montserrat ExtraBold', font_size: 124, text_color: '#FFFFFF', active_color: '#FFE500', outline_color: '#000000', outline: 7, shadow: 0, shadow_color: '#000000', shadow_opacity: 0, inactive_opacity: 1, active_scale: 100, uppercase: false, letter_spacing: 0, line_height: 1.1, position: 0.67 } },
+  ];
 
   /* ---------- Sample content for the mock (business interview) ---------- */
 
@@ -791,6 +862,10 @@
     api.listSocialAccounts = () => op(() => { requireUser(); return {accounts: [], platforms: ['youtube','tiktok','x'].map(platform => ({platform, enabled: false, notice: 'Social publishing needs a configured backend.', private_only: false})), copy_available: false}; });
     api.connectSocialAccount = api.disconnectSocialAccount = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
+    // Captions are derived by the backend from real word timings; the mock only lists styles.
+    api.listCaptionPresets = () => op(() => { requireUser(); return clone(CAPTION_PRESETS); });
+    api.getCaptions = api.saveCaptions = () => op(() => { requireUser(); throw new ApiError('CAPTIONS_UNAVAILABLE', null, 503); });
+
     for (const method of ['getSocialCopy','generateSocialCopy','regenerateSocialCopy','saveSocialCopy','getTikTokCreatorInfo','publishRender','getPublishBatch','retryPublishJob','getPublishingHistory']) api[method] = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
     // Test/demo hooks — deliberately outside the API contract.
@@ -835,5 +910,5 @@
     return api;
   }
 
-  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance };
+  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance, captionLines, retimeCaptionText, nudgeCaption };
 });

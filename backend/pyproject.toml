@@ -15,6 +15,7 @@ dependencies = [
   "authlib>=1.4,<2",
   "faster-whisper>=1.1,<2",
   "av>=12,<16",
+  "fonttools>=4.50,<5",
 ]
 
 [project.optional-dependencies]

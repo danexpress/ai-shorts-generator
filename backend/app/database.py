@@ -73,6 +73,7 @@ class Database:
                 ("stage_progress", "FLOAT"),
             ],
             "transcripts": [("source_digest", "VARCHAR(64)")],
+            "renders": [("framing", "VARCHAR(10)"), ("captions", "JSON")],
         }
         for table, columns in additions.items():
             existing = {column["name"] for column in inspect(self.engine).get_columns(table)}

@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from ..auth import StoreDep, UserDep
+from ..captions.service import exports
 from ..db_models import RenderRecord
 from ..errors import ApiError
 from ..models import Download, Transcript, TranscriptEdit
@@ -98,6 +99,19 @@ def downloads(id: str, store: StoreDep, user: UserDep):
                 "url": url,
                 "downloadUrl": url + "&download=true",
                 "bytes": render.sizeBytes,
+                "renderId": render.id,
             }
         )
+        if render.captions:
+            stem = render.fileName.rsplit(".", 1)[0]
+            for kind, (mime, content) in exports(render.captions).items():
+                items.append(
+                    {
+                        "kind": kind,
+                        "filename": f"{stem}.{kind}",
+                        "url": f"data:{mime};charset=utf-8,{quote(content, safe='')}",
+                        "bytes": len(content.encode("utf-8")),
+                        "renderId": render.id,
+                    }
+                )
     return items

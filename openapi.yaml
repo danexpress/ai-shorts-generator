@@ -351,9 +351,11 @@ paths:
     post:
       operationId: renderClip
       summary: Render a suggested clip to vertical MP4
-      description: Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg
-        cuts the selected continuous source interval, fits the whole frame into a 9:16 canvas while preserving its
-        aspect ratio, adds black padding where needed, and saves the MP4 under MEDIA_DIR/renders.
+      description: 'Requires project ownership, ready non-stale suggestions, and an uploaded source video. FFmpeg
+        cuts the selected continuous source interval into a 9:16 canvas: framing crop (default) fills it with a
+        centered crop; fit keeps the whole frame with black padding. With captions (default), the clip''s caption
+        track is burned in as word-highlighted ASS karaoke in the chosen preset; clips without speech render without
+        captions. Captions come from the stored transcript and never re-transcribe. The MP4 is saved under MEDIA_DIR/renders.'
       parameters:
       - name: id
         in: path
@@ -1323,6 +1325,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/caption-presets:
+    get:
+      operationId: listCaptionPresets
+      summary: List caption styles
+      tags:
+      - Captions
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CaptionPresetInfo'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/projects/{id}/clips/{clipId}/captions:
+    get:
+      operationId: getCaptions
+      summary: Read a clip's caption track
+      tags:
+      - Captions
+      description: Saved track, or one derived from the stored transcript (fillers removed) when none was saved.
+      parameters:
+      - &id001
+        name: id
+        in: path
+        required: true
+        description: Creator-owned project ID.
+        schema:
+          type: string
+      - &id002
+        name: clipId
+        in: path
+        required: true
+        description: Clip ID from the current suggestions.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptionTrack'
+        '401': &id003
+          $ref: '#/components/responses/Error401'
+        '404': &id004
+          $ref: '#/components/responses/Error404'
+        '409': &id005
+          $ref: '#/components/responses/Error409'
+        '410': &id006
+          $ref: '#/components/responses/Error410'
+        '500': &id007
+          $ref: '#/components/responses/Error500'
+    patch:
+      operationId: saveCaptions
+      summary: Edit caption text, timing, style or filler handling
+      tags:
+      - Captions
+      parameters:
+      - *id001
+      - *id002
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptionTrackEdit'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptionTrack'
+        '401': *id003
+        '404': *id004
+        '409': *id005
+        '410': *id006
+        '500': *id007
+        '422':
+          $ref: '#/components/responses/Error422'
 components:
   securitySchemes:
     bearerAuth:
@@ -1939,12 +2027,15 @@ components:
           - txt
           - json
           - mp4
+          - srt
+          - ass
         filename:
           type: string
         url:
           type: string
           format: uri
-          description: Downloadable URL; transcript entries use data URIs and rendered MP4 entries use signed URLs.
+          description: Downloadable URL; transcript and caption entries use data URIs and rendered MP4 entries use
+            signed URLs.
         bytes:
           type: integer
           minimum: 0
@@ -1953,6 +2044,10 @@ components:
           format: uri
           nullable: true
           description: Optional attachment URL for rendered MP4 files.
+        renderId:
+          type: string
+          nullable: true
+          description: Render that an MP4 or caption export belongs to.
     RenderRequest:
       type: object
       required:
@@ -1966,6 +2061,17 @@ components:
           - 720
           - 1080
           default: 1080
+        captions:
+          type: boolean
+          default: true
+          description: Burn in the clip's caption track.
+        captionPreset:
+          type: string
+          maxLength: 40
+          nullable: true
+          description: Preset ID; defaults to the track's preset.
+        framing:
+          $ref: '#/components/schemas/Framing'
     RenderedClip:
       type: object
       required:
@@ -2009,6 +2115,14 @@ components:
         downloadUrl:
           type: string
           format: uri
+        framing:
+          $ref: '#/components/schemas/Framing'
+        captions:
+          type: boolean
+          description: Whether captions were burned in.
+        captionPreset:
+          type: string
+          nullable: true
     Scores:
       type: object
       required:
@@ -2762,6 +2876,211 @@ components:
       required:
       - copy
       title: SocialCopySave
+    Framing:
+      type: string
+      enum:
+      - fit
+      - crop
+      default: crop
+    CaptionWord:
+      type: object
+      required:
+      - text
+      - start
+      - end
+      properties:
+        text:
+          type: string
+        start:
+          type: number
+          description: Absolute source seconds.
+        end:
+          type: number
+        estimated:
+          type: boolean
+          default: false
+          description: Timing interpolated from segment-level timing.
+    CaptionChunk:
+      type: object
+      required:
+      - id
+      - start
+      - end
+      - words
+      properties:
+        id:
+          type: string
+        start:
+          type: number
+        end:
+          type: number
+        words:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaptionWord'
+      description: One on-screen caption of 1-3 words, at most 2 lines of about 15 characters.
+    CaptionTrack:
+      type: object
+      required:
+      - projectId
+      - clipId
+      - clipStart
+      - clipEnd
+      - preset
+      - keepFillers
+      - edited
+      - stale
+      - transcriptRevision
+      - chunks
+      properties:
+        projectId:
+          type: string
+        clipId:
+          type: string
+        clipStart:
+          type: number
+        clipEnd:
+          type: number
+        preset:
+          type: string
+        keepFillers:
+          type: boolean
+        edited:
+          type: boolean
+          description: Contains creator text or timing edits.
+        stale:
+          type: boolean
+          description: The transcript was corrected after these captions were saved.
+        transcriptRevision:
+          type: integer
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaptionChunk'
+          description: Empty when the clip contains no speech.
+    CaptionTrackEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        preset:
+          type: string
+          maxLength: 40
+          nullable: true
+        keepFillers:
+          type: boolean
+          nullable: true
+          description: Changing it rebuilds unedited captions.
+        chunks:
+          type: array
+          nullable: true
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - words
+            properties:
+              words:
+                type: array
+                maxItems: 8
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - text
+                  - start
+                  - end
+                  properties:
+                    text:
+                      type: string
+                      minLength: 1
+                      maxLength: 40
+                    start:
+                      type: number
+                    end:
+                      type: number
+                    estimated:
+                      type: boolean
+                      default: false
+          description: Replacement caption words; chunk timing is recomputed. Words must be ordered, non-overlapping
+            and inside the clip.
+        reset:
+          type: boolean
+          default: false
+          description: Rebuild from the transcript, discarding edits.
+    CaptionPresetInfo:
+      type: object
+      required:
+      - id
+      - label
+      - description
+      - style
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        style:
+          type: object
+          required:
+          - font_name
+          - font_size
+          - text_color
+          - active_color
+          - outline_color
+          - outline
+          - shadow
+          - shadow_color
+          - shadow_opacity
+          - inactive_opacity
+          - active_scale
+          - uppercase
+          - letter_spacing
+          - line_height
+          - position
+          - css_font_size
+          - max_width
+          properties:
+            font_name:
+              type: string
+            font_size:
+              type: integer
+            text_color:
+              type: string
+            active_color:
+              type: string
+            outline_color:
+              type: string
+            outline:
+              type: number
+            shadow:
+              type: number
+            shadow_color:
+              type: string
+            shadow_opacity:
+              type: number
+            inactive_opacity:
+              type: number
+            active_scale:
+              type: integer
+            uppercase:
+              type: boolean
+            letter_spacing:
+              type: number
+            line_height:
+              type: number
+            position:
+              type: number
+            css_font_size:
+              type: number
+              description: Equivalent CSS font-size on the 1080px-wide canvas (libass sizes by ascent plus descent).
+            max_width:
+              type: number
+              description: Widest caption line as a fraction of frame width; longer lines shrink.
+          description: Sizes are pixels on the 1080x1920 canvas; position is the vertical centre as a fraction of
+            height.
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

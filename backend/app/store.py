@@ -19,6 +19,7 @@ from .config import Settings
 from .db_models import (
     ActiveJobRecord,
     AnalysisRunRecord,
+    CaptionTrackRecord,
     IdempotencyRecord,
     JobRecord,
     LedgerRecord,
@@ -645,6 +646,7 @@ class Store:
         record = self.db.get(TranscriptRecord, p.id)
         digest = record.sourceDigest if record else None
         self.db.execute(delete(TranscriptRecord).where(TranscriptRecord.projectId == p.id))
+        self.db.execute(delete(CaptionTrackRecord).where(CaptionTrackRecord.projectId == p.id))
         # The cached transcript is shared by projects with the same source file;
         # remove it with the last transcript that refers to it.
         if digest and not self.db.scalar(

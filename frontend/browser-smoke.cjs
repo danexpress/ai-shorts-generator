@@ -169,16 +169,14 @@ fs.mkdirSync(output, { recursive: true });
       true,
       "Desktop Render remains above the fold",
     );
-    await page.getByText("Captions & branding", { exact: true }).click();
+    // Captions load from the transcript; the default preset is selected.
+    await page.getByRole("list", { name: "Caption lines" }).waitFor();
     assert.equal(
       await page
-        .getByRole("button", {
-          name: "Clean caption style — not available yet",
-        })
-        .isDisabled(),
-      true,
+        .getByRole("button", { name: /Clean Bold/ })
+        .getAttribute("aria-pressed"),
+      "true",
     );
-    await page.getByText("Captions & branding", { exact: true }).click();
     await capture("editor");
     await page.getByRole("button", { name: "720p", exact: true }).click();
     await page
@@ -199,14 +197,9 @@ fs.mkdirSync(output, { recursive: true });
       "Rendered 720p Short plays",
     );
     await video.evaluate((el) => el.pause());
-    await page.getByText("Cover & subtitle files", { exact: true }).click();
-    assert.equal(
-      await page
-        .getByRole("button", { name: "Download SRT", exact: true })
-        .isDisabled(),
-      true,
-    );
-    await page.getByText("Cover & subtitle files", { exact: true }).click();
+    await page.getByText("Subtitle files", { exact: true }).click();
+    await page.getByRole("link", { name: "Download SRT", exact: true }).waitFor();
+    await page.getByText("Subtitle files", { exact: true }).click();
     await capture("result");
     const downloading = page.waitForEvent("download");
     await page

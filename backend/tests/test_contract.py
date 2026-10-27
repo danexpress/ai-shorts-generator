@@ -82,7 +82,7 @@ def test_every_operation_response_matches_root_spec(
 ):
     from app.routers import projects, renders
 
-    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg):
+    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg, **options):
         destination.write_bytes(b"rendered mp4")
 
     monkeypatch.setattr(renders, "render_short", fake_render)

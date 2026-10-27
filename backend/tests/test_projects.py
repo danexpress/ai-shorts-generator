@@ -82,7 +82,7 @@ def test_rendered_mp4_is_saved_playable_listed_and_deleted(
 ):
     from app.routers import renders
 
-    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg):
+    def fake_render(source, destination, start, duration, resolution, configured_ffmpeg, **options):
         assert source.is_file()
         assert start >= 0 and duration > 0 and resolution == 1080
         destination.write_bytes(b"rendered-short-mp4")

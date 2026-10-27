@@ -87,3 +87,98 @@ def test_render_preserves_all_corners_and_aspect_ratio(
         assert max(pixel(left - 6, height / 2)) < 20
         assert min(pixel(left + 6, height / 2)) > 90
         assert max(pixel(width - left + 6, height / 2)) < 20
+
+
+def solid_source(tmp_path, width, height, color="gray", seconds=1.0):
+    source = tmp_path / f"{color}-{width}x{height}.mp4"
+    subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c={color}:s={width}x{height}:r=10:d={seconds}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    return source
+
+
+def frames(path):
+    reader = imageio_ffmpeg.read_frames(str(path), pix_fmt="rgb24")
+    try:
+        metadata = next(reader)
+        return metadata["size"], [bytes(frame) for frame in reader]
+    finally:
+        reader.close()
+
+
+def test_crop_framing_fills_the_vertical_canvas(tmp_path):
+    source, output = solid_source(tmp_path, 160, 90, "gray"), tmp_path / "crop.mp4"
+    render_short(source, output, 0, 0.3, 720, imageio_ffmpeg.get_ffmpeg_exe(), framing="crop")
+    (width, height), [frame, *_] = frames(output)
+    assert (width, height) == (720, 1280)
+    for x, y in [(2, 2), (width - 3, 2), (2, height - 3), (width - 3, height - 3)]:
+        offset = (y * width + x) * 3
+        assert min(frame[offset : offset + 3]) > 90  # no black padding anywhere
+
+
+def test_burned_in_captions_highlight_the_spoken_word(tmp_path):
+    from app.captions.formats import build_ass
+    from app.captions.presets import FONTS_DIR, PRESETS
+
+    chunks = [
+        {
+            "id": "c0",
+            "start": 0.0,
+            "end": 1.0,
+            "words": [
+                {"text": "HELLO", "start": 0.0, "end": 0.5},
+                {"text": "WORLD", "start": 0.5, "end": 1.0},
+            ],
+        }
+    ]
+    ass = build_ass(chunks, PRESETS["clean-bold"], 0.0)
+    source, output = solid_source(tmp_path, 160, 90, "blue", 1.2), tmp_path / "captions.mp4"
+    render_short(
+        source,
+        output,
+        0,
+        1.2,
+        720,
+        imageio_ffmpeg.get_ffmpeg_exe(),
+        framing="crop",
+        captions_ass=ass,
+        fonts_dir=FONTS_DIR,
+    )
+    (width, height), video = frames(output)
+
+    def yellow_columns(frame):
+        """x positions of yellow pixels in the caption band (around 67% height)."""
+        found = []
+        for y in range(int(height * 0.6), int(height * 0.74), 4):
+            for x in range(0, width, 4):
+                r, g, b = frame[(y * width + x) * 3 : (y * width + x) * 3 + 3]
+                if r > 200 and g > 180 and b < 90:
+                    found.append(x)
+        return found
+
+    first, second, after = (
+        yellow_columns(video[2]),
+        yellow_columns(video[7]),
+        yellow_columns(video[11]),
+    )
+    assert first and second and not after  # captions end with the chunk
+    # "HELLO WORLD" fits on one line: the highlight moves from left to right.
+    assert max(first) < min(second) and max(first) < width / 2 < max(second)
+    assert video[11][(int(height * 0.67) * width + width // 2) * 3 + 2] > 150  # blue again

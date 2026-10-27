@@ -220,16 +220,98 @@ class Transcript(BaseModel):
 
 
 class Download(BaseModel):
-    kind: Literal["txt", "json", "mp4"]
+    kind: Literal["txt", "json", "mp4", "srt", "ass"]
     filename: str
     url: str
     bytes: int
     downloadUrl: str | None = None
+    renderId: str | None = None
+
+
+Framing = Literal["fit", "crop"]
 
 
 class RenderRequest(RequestModel):
     clipId: str
     resolution: Literal[720, 1080] = 1080
+    # Burn in the clip's caption track (when the clip contains speech).
+    captions: bool = True
+    captionPreset: str | None = Field(default=None, max_length=40)
+    framing: Framing = "crop"
+
+
+class CaptionWord(BaseModel):
+    text: str
+    start: float
+    end: float
+    estimated: bool = False
+
+
+class CaptionChunk(BaseModel):
+    id: str
+    start: float
+    end: float
+    words: list[CaptionWord]
+
+
+class CaptionTrack(BaseModel):
+    projectId: str
+    clipId: str
+    clipStart: float
+    clipEnd: float
+    preset: str
+    keepFillers: bool
+    edited: bool
+    stale: bool
+    transcriptRevision: int
+    chunks: list[CaptionChunk]
+
+
+class CaptionWordEdit(RequestModel):
+    text: str = Field(min_length=1, max_length=40)
+    start: float
+    end: float
+    estimated: bool = False
+
+
+class CaptionChunkEdit(RequestModel):
+    words: list[CaptionWordEdit] = Field(max_length=8)
+
+
+class CaptionTrackEdit(RequestModel):
+    preset: str | None = Field(default=None, max_length=40)
+    keepFillers: bool | None = None
+    # Replaces the caption text/timing; chunk timing is recomputed from the words.
+    chunks: list[CaptionChunkEdit] | None = Field(default=None, max_length=2000)
+    # Rebuild from the transcript, discarding edits.
+    reset: bool = False
+
+
+class CaptionStyle(BaseModel):
+    font_name: str
+    font_size: int
+    text_color: str
+    active_color: str
+    outline_color: str
+    outline: float
+    shadow: float
+    shadow_color: str
+    shadow_opacity: float
+    inactive_opacity: float
+    active_scale: int
+    uppercase: bool
+    letter_spacing: float
+    line_height: float
+    position: float
+    css_font_size: float
+    max_width: float
+
+
+class CaptionPresetInfo(BaseModel):
+    id: str
+    label: str
+    description: str
+    style: CaptionStyle
 
 
 class RenderedClip(BaseModel):
@@ -244,6 +326,9 @@ class RenderedClip(BaseModel):
     expiresAt: int
     url: str
     downloadUrl: str
+    framing: Framing = "fit"
+    captions: bool = False
+    captionPreset: str | None = None
 
 
 class Scores(BaseModel):

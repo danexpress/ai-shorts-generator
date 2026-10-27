@@ -15,7 +15,18 @@ from .database import Database
 from .db_models import DatabaseState, UserRecord
 from .errors import ApiError
 from .models import ErrorResponse
-from .routers import analysis, auth, media, projects, renders, social, transcripts, uploads, usage
+from .routers import (
+    analysis,
+    auth,
+    captions,
+    media,
+    projects,
+    renders,
+    social,
+    transcripts,
+    uploads,
+    usage,
+)
 from .social.accounts import AccountService
 from .social.adapters import publishers
 from .social.config import SocialSettings
@@ -158,6 +169,7 @@ def create_app(
         projects.router,
         transcripts.router,
         analysis.router,
+        captions.router,
         usage.router,
         social.router,
     ):

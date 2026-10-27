@@ -38,6 +38,7 @@ class Component extends DCLogic {
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
     renderedClips: [], renderingId: null, resolution: 1080, result: null, renderError: null,
+    captions: { clipId: null, track: null, draft: null, loading: false, error: null, saving: false, dirty: false, confirmReset: false, texts: {} }, captionPresets: [], burnCaptions: true, framing: 'crop', captionFiles: {},
     publishing: {loading:false, busy:false, error:null, copy:{}, selected:{}, settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}}, history:[], batch:null, creator:null, creatorError:null},
     social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
     theme: 'system', dashboardLoading: false, dashboardError: null, clipsError: null,
@@ -118,7 +119,8 @@ class Component extends DCLogic {
       social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
-      renderedClips: [], renderingId: null, result: null, renderError: null, usageEntries: [],
+      renderedClips: [], renderingId: null, result: null, renderError: null, usageEntries: [], captionFiles: {},
+      captions: { clipId: null, track: null, draft: null, loading: false, error: null, saving: false, dirty: false, confirmReset: false, texts: {} },
       dashboardError: null, clipsError: null, transcriptError: null, usageError: null,
       np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
       regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null });
@@ -375,12 +377,15 @@ class Component extends DCLogic {
         ...item, url: this.mediaUrl(item.url),
         downloadUrl: this.mediaUrl(item.downloadUrl || item.url),
       }));
+      const captionFiles = {};
+      downloads.filter((item) => (item.kind === 'srt' || item.kind === 'ass') && item.renderId)
+        .forEach((item) => { (captionFiles[item.renderId] = captionFiles[item.renderId] || []).push(item); });
       this.setState((s) => {
         const previousUrl = s.previewUrls[id];
         if (playbackUrl && previousUrl && previousUrl.startsWith('blob:') && typeof URL !== 'undefined') URL.revokeObjectURL(previousUrl);
         return {
           clipsRes: res,
-          renderedClips,
+          renderedClips, captionFiles,
           previewUrls: playbackUrl ? { ...s.previewUrls, [id]: playbackUrl } : s.previewUrls,
           regen: { goal: res.goal || s.regen.goal, instruction: res.instruction || '', avoid: (res.avoid || []).join(', ') },
         };
@@ -489,13 +494,76 @@ class Component extends DCLogic {
     } catch (e) { this.notify(e.message); }
   }
 
+  /* captions */
+  async loadCaptions(clipId) {
+    const projectId = this.state.projectId;
+    this.setState({ captions: { clipId, track: null, draft: null, loading: true, error: null, saving: false, dirty: false, confirmReset: false, texts: {} } });
+    try {
+      const [track, presets] = await Promise.all([
+        this.api.getCaptions(projectId, clipId),
+        this.state.captionPresets.length ? this.state.captionPresets : this.api.listCaptionPresets(),
+      ]);
+      if (projectId !== this.state.projectId || this.state.captions.clipId !== clipId) return;
+      this.setState((s) => ({ captionPresets: presets, captions: { ...s.captions, track, draft: track.chunks, loading: false } }));
+    } catch (e) {
+      if (this.handleAuth(e) || this.state.captions.clipId !== clipId) return;
+      const error = e.code ? e.message : 'Captions could not load. Try again.';
+      this.setState((s) => ({ captions: { ...s.captions, loading: false, error } }));
+    }
+  }
+  setCaptionDraft(draft) { this.setState((s) => ({ captions: { ...s.captions, draft, dirty: true, texts: {} } })); }
+  typeCaptionText(index, text) { this.setState((s) => ({ captions: { ...s.captions, texts: { ...s.captions.texts, [index]: text } } })); }
+  // Applied when the field loses focus, so typing never re-times words mid-edit.
+  editCaptionText(index, text) {
+    const current = this.state.captions.draft[index].words.map((w) => w.text).join(' ');
+    if (text.trim().split(/\s+/).join(' ') === current) return this.setState((s) => ({ captions: { ...s.captions, texts: {} } }));
+    const draft = this.state.captions.draft.slice();
+    const next = window.ShortsServices.retimeCaptionText(draft[index], text);
+    if (next) draft[index] = next; else draft.splice(index, 1);
+    this.setCaptionDraft(draft);
+  }
+  nudgeCaption(index, delta) {
+    const { draft, track } = this.state.captions;
+    const { chunks, moved } = window.ShortsServices.nudgeCaption(draft, index, delta, track.clipStart, track.clipEnd);
+    if (!moved) return this.notify('There is no room to move this caption further.');
+    this.setCaptionDraft(chunks);
+  }
+  // PATCH the caption track; unsaved text/timing edits always travel with it.
+  async saveCaptions(patch = {}) {
+    const { captions, projectId } = this.state;
+    if (!captions.track || captions.saving) return false;
+    const body = { ...patch };
+    if (captions.dirty && !patch.reset) body.chunks = captions.draft.map((c) => ({ words: c.words.map(({ text, start, end, estimated }) => ({ text, start, end, estimated: !!estimated })) }));
+    this.setState((s) => ({ captions: { ...s.captions, saving: true, error: null } }));
+    try {
+      const track = await this.api.saveCaptions(projectId, captions.clipId, body);
+      this.setState((s) => ({ captions: { ...s.captions, track, draft: track.chunks, saving: false, dirty: false, confirmReset: false, texts: {} } }));
+      return true;
+    } catch (e) {
+      if (!this.handleAuth(e)) this.setState((s) => ({ captions: { ...s.captions, saving: false, error: e.message } }));
+      return false;
+    }
+  }
+  toggleFillers() {
+    const { track, dirty } = this.state.captions;
+    if (!track) return;
+    if (track.edited || dirty) return this.setState((s) => ({ captions: { ...s.captions, confirmReset: true } }));
+    this.saveCaptions({ keepFillers: !track.keepFillers });
+  }
+
   async renderClip(clipId) {
     if (this.state.renderingId) return;
     const projectId = this.state.projectId;
     const clip = this.state.clipsRes?.clips.find(c => c.id === clipId);
+    const { captions, burnCaptions, framing } = this.state;
+    // Burn in exactly what the creator sees: save pending caption edits first.
+    if (burnCaptions && captions.clipId === clipId && captions.dirty && !(await this.saveCaptions())) {
+      this.setState({ renderError: 'Save your caption edits before rendering.' });
+      return;
+    }
     this.setState({ renderingId: clipId, renderError: null });
     try {
-      const result = await this.api.renderClip(projectId, { clipId, resolution: this.state.resolution });
+      const result = await this.api.renderClip(projectId, { clipId, resolution: this.state.resolution, captions: burnCaptions, framing });
       if (this.state.projectId !== projectId || !this.state.me) return result;
       const rendered = { ...result, url: this.mediaUrl(result.url), downloadUrl: this.mediaUrl(result.downloadUrl || result.url), hook: clip?.hook };
       this.setState({ result: rendered, ...(this.state.route === 'editor' && this.state.previewId === clipId ? { route: 'result' } : {}) });
@@ -611,7 +679,7 @@ class Component extends DCLogic {
       isRendering: s.renderingId === c.id, canRender: !!s.selected[c.id],
       renderLabel: s.renderingId === c.id ? 'Rendering MP4…' : 'Render Short (1080p)',
       border: s.selected[c.id] ? 'var(--color-accent)' : 'var(--color-divider)',
-      preview: () => this.setState({ previewId: c.id, route: 'editor', renderError: null }), select: () => selectClip(c.id),
+      preview: () => { this.setState({ previewId: c.id, route: 'editor', renderError: null }); if (s.captions.clipId !== c.id) this.loadCaptions(c.id); }, select: () => selectClip(c.id),
       render: () => this.renderClip(c.id),
     }));
     const renderedClips = s.renderedClips.map((r) => ({
@@ -620,6 +688,29 @@ class Component extends DCLogic {
     const regenerating = !!(st && st.stage && st.jobType === 'analysis');
     const pc = cr && s.previewId ? cr.clips.find((c) => c.id === s.previewId) : null;
     const excerpt = pc ? excerptFor(pc) : '';
+    const cap = s.captions;
+    const capTrack = pc && cap.clipId === pc.id ? cap.track : null;
+    const presetStyle = (s.captionPresets.find((p) => p.id === capTrack?.preset) || s.captionPresets[0])?.style || null;
+    const fmtT = (t) => Math.max(0, t - (capTrack?.clipStart || 0)).toFixed(1);
+    const captionView = {
+      loading: cap.loading, error: cap.error, saving: cap.saving, dirty: cap.dirty, ready: !!capTrack,
+      enabled: s.burnCaptions, toggleEnabled: () => this.setState((x) => ({ burnCaptions: !x.burnCaptions })),
+      framing: s.framing, framings: [['crop', 'Fill 9:16'], ['fit', 'Fit whole frame']].map(([id, label]) => ({ id, label, pressed: String(s.framing === id), pick: () => this.setState({ framing: id }), disabled: !!s.renderingId })),
+      presets: s.captionPresets.map((p) => ({ ...p, pressed: capTrack?.preset === p.id, pick: () => this.saveCaptions({ preset: p.id }) })),
+      style: presetStyle, keepFillers: !!capTrack?.keepFillers, toggleFillers: () => this.toggleFillers(),
+      confirmReset: cap.confirmReset, cancelReset: () => this.setState((x) => ({ captions: { ...x.captions, confirmReset: false } })),
+      confirmFillerReset: () => this.saveCaptions({ keepFillers: !capTrack.keepFillers, reset: true }),
+      reset: () => this.saveCaptions({ reset: true }), save: () => this.saveCaptions(),
+      edited: !!capTrack?.edited || cap.dirty, stale: !!capTrack?.stale, noSpeech: !!capTrack && !(cap.draft || []).length,
+      chunks: capTrack ? cap.draft : [],
+      rows: capTrack ? cap.draft.map((c, i) => ({
+        key: c.id + ':' + i, index: i, text: cap.texts[i] ?? c.words.map((w) => w.text).join(' '),
+        time: fmtT(c.words[0].start) + '–' + fmtT(c.words[c.words.length - 1].end) + 's',
+        estimated: c.words.some((w) => w.estimated),
+        type: (e) => this.typeCaptionText(i, e.target.value), commit: (e) => this.editCaptionText(i, e.target.value), earlier: () => this.nudgeCaption(i, -0.1), later: () => this.nudgeCaption(i, 0.1),
+      })) : [],
+      retry: () => pc && this.loadCaptions(pc.id),
+    };
     const pv = pc ? {
       id: pc.id, start: pc.start, end: pc.end, rank: pc.rank, hook: pc.hook, reason: pc.reason, range: fmt(pc.start) + ' – ' + fmt(pc.end), duration: fmt(pc.duration),
       hasVideo: !!projectPreviewUrl, noVideo: !projectPreviewUrl,
@@ -723,6 +814,7 @@ class Component extends DCLogic {
       transcriptLoaded: !!s.transcript, transcriptError: s.transcriptError, savingTranscript: s.savingTranscript,
       resolution: s.resolution, setResolution: resolution => this.setState({ resolution }),
       renderingId: s.renderingId, renderError: s.renderError, renderPreview: () => pc && this.renderClip(pc.id),
+      captions: captionView, captionFiles: s.captionFiles,
       sourceExpired: !!project.sourceExpired, result: s.result,
       openResult: result => this.openResult({ ...result, hook: result.hook || cr?.clips.find(c => c.id === result.clipId)?.hook }),
       copy: text => this.copy(text), usageLoading: s.usageLoading, usageError: s.usageError,

@@ -18,7 +18,7 @@ The first server start creates the schema and demo rows. Set `SEED_DEMO_DATA=fal
 
 To enable YouTube URL import, set `YOUTUBE_IMPORT=true` before starting the server. The New Project screen accepts public YouTube watch and `youtu.be` links, requires the rights confirmation, downloads the video to `MEDIA_DIR/sources/`, and then lets the normal processing flow run. It enforces a 30-second minimum, 3-hour maximum, and 4-GiB download cap. Import is disabled by default. The downloader is yt-dlp; make sure your use complies with YouTube's terms and you have permission to download and reuse the video.
 
-Uploaded source videos are stored by default under `backend/media/sources/` using opaque filenames. Set `MEDIA_DIR` to change the storage root. Browser playback streams byte ranges through short-lived signed URLs, allowing seeking without downloading the whole file. Select a suggestion and choose **Render Short** to create a vertical 1080p MP4 (or call `POST /v1/projects/{id}/render` with resolution `720` or `1080`). Rendering preserves the entire source frame and its proportions, centering it on the vertical canvas with black padding when needed. Existing cropped exports must be rendered again to use this framing. The backend stores rendered files under `backend/media/renders/` by default, exposes preview/download links in the project downloads, and removes rendered files after seven days or when the project is deleted. `imageio-ffmpeg` supplies FFmpeg; set `FFMPEG_BIN` to use a system FFmpeg binary instead. Set `MEDIA_SIGNING_KEY` to a private random value outside local development.
+Uploaded source videos are stored by default under `backend/media/sources/` using opaque filenames. Set `MEDIA_DIR` to change the storage root. Browser playback streams byte ranges through short-lived signed URLs, allowing seeking without downloading the whole file. Select a suggestion and choose **Render Short** to create a vertical 1080p MP4 (or call `POST /v1/projects/{id}/render` with resolution `720` or `1080`). By default the render fills the 9:16 canvas with a center crop (`framing: "crop"`) and burns in karaoke captions (see [Karaoke captions](#karaoke-captions)); `framing: "fit"` instead keeps the entire source frame and its proportions on black padding, and `captions: false` renders without captions. The backend stores rendered files under `backend/media/renders/` by default, exposes preview/download links in the project downloads, and removes rendered files after seven days or when the project is deleted. `imageio-ffmpeg` supplies FFmpeg; set `FFMPEG_BIN` to use a system FFmpeg binary instead. Set `MEDIA_SIGNING_KEY` to a private random value outside local development.
 
 Use one application process with SQLite for local development. SQLite serializes writes, and demo jobs advance as API requests arrive. PostgreSQL can be used for a multi-process deployment after adding its driver and migrations.
 
@@ -52,7 +52,7 @@ The frontend uses password sign-in and adds the bearer token automatically. Run 
 
 ## Backend behavior
 
-Uploaded videos are transcribed locally with faster-whisper by the processing worker (see [Transcription](#transcription)). Clip suggestions are still produced by the demo analyzer from that transcript. Selected intervals are actually rendered with FFmpeg; face-aware framing, captions and object storage are not implemented. With `PROCESSING_MODE=demo`, transcripts are canned demo content and processing advances when API requests arrive. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
+Uploaded videos are transcribed locally with faster-whisper by the processing worker (see [Transcription](#transcription)). Clip suggestions are still produced by the demo analyzer from that transcript. Selected intervals are actually rendered with FFmpeg, with burned-in word-highlighted captions; face-aware framing and object storage are not implemented. With `PROCESSING_MODE=demo`, transcripts are canned demo content and processing advances when API requests arrive. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
 
@@ -67,6 +67,25 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - **No speech:** symbol-only output (`♪`), Whisper's no-speech heuristic, and repetitive decoding loops are filtered. If nothing remains (silence, music only), the project fails with `NO_SPEECH`, which explains the problem and cannot be retried.
 - **Logs:** model load time, audio duration, transcription time and realtime factor, and cache hits are logged by the worker.
 
+## Karaoke captions
+
+Captions are built from the stored transcript's word timestamps; they never trigger a new transcription.
+
+1. **Chunking** (`app/captions/chunking.py`): the clip's words (those whose midpoint lies in the clip) are grouped into chunks of 1–3 words that fit at most 2 lines of about 15 characters. A chunk ends after punctuation (`. , ! ? ; :`), before a pause of 0.35 s or more, or when the next word would not fit; words are never split, and a single long word may take a line alone. Each chunk runs from its first word's start to its last word's end, extended to at least 0.3 s into neighbouring silence without overlapping. Filler words (`um`, `uh`, `er`, `hmm`…) are dropped by default. All of these rules are `ChunkOptions` defaults.
+2. **Editing**: `GET /v1/projects/{id}/clips/{clipId}/captions` returns the clip's caption track, derived on the fly until it is first saved. `PATCH` the same path to change the style (`preset`), toggle `keepFillers`, replace the words (`chunks` — fix typos, nudge timing), or `reset` to the transcript. Edited words must stay in order, non-overlapping and inside the clip; chunk timing is recomputed from them. If the text of a chunk changes word count, the editor spreads the new words over the chunk's original time span and marks them `estimated`. Correcting the transcript afterwards marks a saved track `stale`; reset rebuilds it. Changing filler handling on an edited track requires a reset, because it re-chunks the words.
+3. **Rendering** (`app/captions/formats.py`): an ASS file on a 1080×1920 canvas has one event per word. The whole chunk is shown and the word being spoken gets the active colour (and optional pop scale), so exactly one word is highlighted at a time. The renderer burns it in with libass, using only the bundled fonts in `app/captions/fonts/` (Montserrat, SIL Open Font License). Lines are measured with the font's glyph widths and shrunk if they would leave the safe zone. Each render stores a snapshot of its captions; the project downloads then include matching `.srt` (plain cues, one per chunk) and `.ass` files for that render.
+4. **Preview**: the editor overlays the same chunks on the source video in the browser, following the video clock each animation frame, with the preset's colours and sizes.
+
+### Caption presets
+
+Presets live in `app/captions/presets.py`: Clean Bold (default: white Montserrat ExtraBold, thick black outline, spoken word yellow), Creator Pop (uppercase Black, spoken word green and 115%) and Minimal Highlight (SemiBold, upcoming words dimmed). Every visual value of a style is a `CaptionPreset` field; chunking rules are shared by all presets, so switching style never re-chunks or loses edits.
+
+To add a preset:
+
+1. If it needs a new font, add the `.ttf` to `app/captions/fonts/` (and `frontend/fonts/` plus an `@font-face` in `frontend/app.css` for the preview). Use a font whose licence allows embedding, and keep its licence file alongside it.
+2. Add a `CaptionPreset(...)` entry to `PRESETS` with a unique `id`, the `font_file`, the font's full name as `font_name` (check it with fontTools: name ID 4), colours as `#RRGGBB`, and sizes in pixels on the 1080×1920 canvas. `position` is the vertical centre of the caption block as a fraction of the height (0.67 sits above the platforms' bottom overlays).
+3. Run `make test`: `test_every_preset_fits_the_safe_zone` checks the font file exists and a worst-case two-line caption stays inside `SAFE_ZONE`. The new preset appears in `GET /v1/caption-presets` and in the editor automatically.
+
 ## Modules and checks
 
 - `app/database.py`: configurable engine and request transactions; SQLite options only.
@@ -76,6 +95,7 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - `app/renderer.py`: FFmpeg vertical MP4 rendering.
 - `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
 - `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
+- `app/captions/`: chunking, presets, glyph measurement, ASS/SRT writers and caption-track service; `app/routers/captions.py` exposes presets and per-clip tracks.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 

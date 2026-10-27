@@ -598,3 +598,73 @@ test('retry calls only the failed job endpoint',async t=>{
   const page=await publishingPage(t,{getPublishingHistory:async()=>[batch],retryPublishJob:async id=>retries.push(id),getPublishBatch:async()=>batch});
   await page.retrySocialJob(batch.jobs[1]);assert.deepEqual(retries,['x']);
 });
+
+test('paths with several parameters fill them in order and encode each one', async () => {
+  const calls = [];
+  const api = S.createHttpApi({ baseUrl: 'http://api.test', storage: null, fetch: async (url, init) => { calls.push({ url, ...init }); return response({}); } });
+  await api.saveCaptions('prj 1', 'clp/2', { preset: 'creator-pop' });
+  assert.equal(calls[0].url, 'http://api.test/v1/projects/prj%201/clips/clp%2F2/captions');
+  assert.equal(calls[0].method, 'PATCH');
+  assert.deepEqual(JSON.parse(calls[0].body), { preset: 'creator-pop' });
+  await api.listCaptionPresets();
+  assert.equal(calls[1].url, 'http://api.test/v1/caption-presets');
+});
+
+test('caption helpers mirror backend layout and never move words past neighbours', () => {
+  assert.deepEqual(S.captionLines(['most', 'founders', 'hire']), [['most'], ['founders', 'hire']]);
+  assert.deepEqual(S.captionLines(['hire', 'for', 'the']), [['hire', 'for', 'the']]);
+  const chunk = { words: [{ text: 'teh', start: 1, end: 1.5 }, { text: 'idea', start: 1.5, end: 2 }] };
+  assert.deepEqual(S.retimeCaptionText(chunk, 'the idea').words, [{ text: 'the', start: 1, end: 1.5 }, { text: 'idea', start: 1.5, end: 2 }]);
+  const split = S.retimeCaptionText(chunk, 'the big idea').words;
+  assert.equal(split.length, 3);
+  assert.ok(split.every((w) => w.estimated));
+  assert.equal(split[0].start, 1);
+  assert.equal(split[2].end, 2);
+  assert.equal(S.retimeCaptionText(chunk, '   '), null);
+  const next = { words: [{ text: 'n', start: 2.05, end: 2.5 }] };
+  const { chunks, moved } = S.nudgeCaption([chunk, next], 0, 0.1, 0, 10);
+  assert.equal(moved, 0.05);
+  assert.equal(chunks[0].words[1].end, 2.05);
+  assert.equal(S.nudgeCaption([chunk, next], 1, 0.1, 0, 2.5).moved, 0);
+});
+
+test('editor loads captions, commits text on blur, saves edits before rendering', async t => {
+  const calls = [];
+  const track = { projectId: 'p1', clipId: 'c1', clipStart: 4, clipEnd: 24, preset: 'clean-bold', keepFillers: false, edited: false, stale: false, transcriptRevision: 1,
+    chunks: [{ id: 'c0', start: 4, end: 4.6, words: [{ text: 'Most', start: 4, end: 4.3 }, { text: 'foundrs', start: 4.3, end: 4.6 }] }] };
+  const presets = [{ id: 'clean-bold', label: 'Clean Bold', description: '', style: { font_name: 'Montserrat ExtraBold' } }];
+  const page = component({ ...S, createApi: () => ({
+    getCaptions: async (...args) => { calls.push(['get', ...args]); return track; },
+    listCaptionPresets: async () => presets,
+    saveCaptions: async (id, clipId, body) => { calls.push(['save', id, clipId, body]); return { ...track, edited: true, chunks: body.chunks.map((c, i) => ({ id: 'c' + i, start: c.words[0].start, end: c.words.at(-1).end, words: c.words })) }; },
+    renderClip: async (id, body) => { calls.push(['render', id, body]); return { id: 'r1', url: '/m', downloadUrl: '/m?d' }; },
+    getClips: async () => ({ clips: [] }), getProjectPlayback: async () => null, getProjectDownloads: async () => [],
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, projectId: 'p1', clipsRes: { clips: [{ id: 'c1', rank: 1, start: 4, end: 24, duration: 20, hook: 'Hook', scores: { hook: 90, value: 80, standalone: 85, visual: 70 } }] } });
+  page.renderVals().clips[0].preview();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(JSON.stringify(calls[0]), JSON.stringify(['get', 'p1', 'c1']));
+  let c = page.renderVals().appProps.v.captions;
+  assert.equal(c.ready, true);
+  assert.equal(c.rows[0].text, 'Most foundrs');
+  assert.equal(c.presets[0].pressed, true);
+
+  // Typing alone never re-times; committing the same word count keeps real timing.
+  c.rows[0].type({ target: { value: 'Most founders' } });
+  assert.equal(page.state.captions.dirty, false);
+  c = page.renderVals().appProps.v.captions;
+  c.rows[0].commit({ target: { value: 'Most founders' } });
+  assert.equal(page.state.captions.dirty, true);
+  // Objects from the page's vm realm compare by value through JSON.
+  assert.equal(JSON.stringify(page.state.captions.draft[0].words[1]), JSON.stringify({ text: 'founders', start: 4.3, end: 4.6 }));
+
+  page.renderVals().appProps.v.captions.framings[1].pick();  // fit
+  await page.renderVals().appProps.v.renderPreview();
+  const [save, render] = calls.slice(1);
+  assert.equal(save[0], 'save');
+  assert.equal(save[3].chunks[0].words[1].text, 'founders');
+  assert.equal(JSON.stringify(render), JSON.stringify(['render', 'p1', { clipId: 'c1', resolution: 1080, captions: true, framing: 'fit' }]));
+  assert.equal(page.state.captions.dirty, false);
+});
