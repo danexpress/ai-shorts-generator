@@ -65,6 +65,21 @@ class Database:
                 connection.exec_driver_sql(
                     "ALTER TABLE uploads ADD COLUMN content_type VARCHAR(128)"
                 )
+        # Additive columns for real transcription and the processing worker.
+        additions = {
+            "jobs": [
+                ("lease_owner", "VARCHAR(40)"),
+                ("lease_until", "BIGINT"),
+                ("stage_progress", "FLOAT"),
+            ],
+            "transcripts": [("source_digest", "VARCHAR(64)")],
+        }
+        for table, columns in additions.items():
+            existing = {column["name"] for column in inspect(self.engine).get_columns(table)}
+            with self.engine.begin() as connection:
+                for name, ddl in columns:
+                    if name not in existing:
+                        connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
         try:
             with self.sessions.begin() as session:
                 session.add(DatabaseState(id=1, revision=0, demoSeeded=False))

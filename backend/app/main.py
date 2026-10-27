@@ -61,7 +61,8 @@ def create_app(
         lifespan=lifespan,
         version="0.1.0",
         description=(
-            "SQLAlchemy-backed demo backend with persistent data. Media processing is simulated. "
+            "SQLAlchemy-backed backend with persistent data. Media is transcribed by the "
+            "processing worker (or simulated with PROCESSING_MODE=demo). "
             "Sign in with email and password at /v1/auth/google, then use a bearer token. "
             "The historical route name does not imply Google OAuth."
         ),

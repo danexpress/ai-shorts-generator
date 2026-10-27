@@ -4,7 +4,7 @@ FastAPI implements the operations in [`../openapi.yaml`](../openapi.yaml). SQLAl
 
 ## Run
 
-From the repository root, run `make run`. To override the connection URL:
+From the repository root, run `make run` and, in a second terminal, `make worker` (it transcribes and analyzes uploaded videos; without it projects stay in *Transcribing*). Set `PROCESSING_MODE=demo` on both to use the simulated pipeline instead. To override the connection URL:
 
 ```sh
 DATABASE_URL='sqlite+pysqlite:////absolute/path/to/ai-shorts.db' make run
@@ -52,9 +52,20 @@ The frontend uses password sign-in and adds the bearer token automatically. Run 
 
 ## Backend behavior
 
-Transcript and clip results are demo content, and processing advances when API requests arrive. Selected intervals are actually rendered with FFmpeg; automatic transcription, clip analysis, face-aware framing, captions and object storage are not implemented. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
+Uploaded videos are transcribed locally with faster-whisper by the processing worker (see [Transcription](#transcription)). Clip suggestions are still produced by the demo analyzer from that transcript. Selected intervals are actually rendered with FFmpeg; face-aware framing, captions and object storage are not implemented. With `PROCESSING_MODE=demo`, transcripts are canned demo content and processing advances when API requests arrive. Platform-specific social copy is available through the optional configured copy model; it requires review of the demo transcript. YouTube URLs are actually downloaded when the opt-in feature flag is enabled.
 
 It enforces ownership, invitations, one active job per creator, source limits, usage allowance, retries, cancellation, idempotency, and retention. Transcript JSON and clip output use portable SQLAlchemy JSON columns; ownership, job state, and usage use relational columns and constraints.
+
+## Transcription
+
+`make worker` runs `app.jobs.worker`, which claims processing jobs with a renewable lease, transcribes the source with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (word timestamps, VAD filtering) outside any database transaction, and then runs analysis. Progress shown in the app is the real fraction of audio decoded. Canceling or deleting a project while it transcribes makes the worker discard its result.
+
+- **Model and device:** `WHISPER_MODEL` (default `small`; `tiny`/`base` are faster, `medium`/`large-v3` more accurate). `WHISPER_DEVICE=auto` uses an NVIDIA GPU (CUDA, float16) when present, otherwise CPU int8. CTranslate2 has no Apple-silicon GPU backend, so Macs run on CPU; `small` runs at roughly 0.4× realtime on an M4 Pro. The model downloads from Hugging Face on first use.
+- **Tighter word timing:** `uv sync --extra align` then `WHISPER_ALIGN=whisperx` re-aligns words with WhisperX (wav2vec2 forced alignment). Words it cannot align keep their Whisper timing. The extra pulls in PyTorch and is not installed by default.
+- **Transcribed once:** results are cached at `MEDIA_DIR/transcripts/<sha256 of source>.<model>.json` in the format `segments → words → {text, start, end, probability}`. Retries and identical uploads reuse the file. The cache file is deleted with the last project transcript that refers to it, so it follows the analysis retention policy.
+- **Stored transcript:** the project transcript keeps the existing API shape (`segments[].words[] = {w, s, e}`); transcript edits, captions and analysis all read from it.
+- **No speech:** symbol-only output (`♪`), Whisper's no-speech heuristic, and repetitive decoding loops are filtered. If nothing remains (silence, music only), the project fails with `NO_SPEECH`, which explains the problem and cannot be retried.
+- **Logs:** model load time, audio duration, transcription time and realtime factor, and cache hits are logged by the worker.
 
 ## Modules and checks
 
@@ -63,10 +74,12 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 - `app/store.py`: database operations, seed content, simulated jobs, usage, retention.
 - `app/routers/`: auth, upload, project, media, render, transcript, analysis, and usage APIs.
 - `app/renderer.py`: FFmpeg vertical MP4 rendering.
+- `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
+- `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.
 
-Run `make test` and `make lint` from the repository root. Tests cover the existing and social routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
+Run `make test` and `make lint` from the repository root. Worker and transcription tests use a fake transcriber; Whisper never runs in the test suite. Tests cover the existing and social routes, source and rendered video range streaming, render storage and cleanup, restart persistence, multi-instance access, concurrency, transaction rollback, foreign keys, idempotency, usage, and PostgreSQL DDL compilation. `make test-frontend` also runs an isolated live HTTP integration test.
 
 ## Social publishing
 

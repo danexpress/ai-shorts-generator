@@ -25,6 +25,12 @@ def clock():
     return Clock()
 
 
+@pytest.fixture(autouse=True)
+def demo_processing(monkeypatch):
+    # Existing API tests drive the clock-based simulator; worker tests opt into "local".
+    monkeypatch.setenv("PROCESSING_MODE", "demo")
+
+
 @pytest.fixture
 def settings(tmp_path):
     return Settings(

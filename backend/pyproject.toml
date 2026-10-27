@@ -13,6 +13,13 @@ dependencies = [
   "cryptography>=44,<48",
   "httpx>=0.27,<1",
   "authlib>=1.4,<2",
+  "faster-whisper>=1.1,<2",
+  "av>=12,<16",
+]
+
+[project.optional-dependencies]
+align = [
+    "whisperx>=3.3",
 ]
 
 [dependency-groups]

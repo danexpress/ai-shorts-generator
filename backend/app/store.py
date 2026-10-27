@@ -33,6 +33,8 @@ from .errors import ApiError
 from .models import Guidance, Project, UploadRequest
 
 DAY = 86_400_000
+# Failures where retrying the same source cannot help.
+NON_RETRYABLE = {"NO_SPEECH"}
 
 
 def oid(prefix: str) -> str:
@@ -429,6 +431,8 @@ class Store:
 
     def tick(self):
         self.expire()
+        if self.settings.processing_mode != "demo":
+            return  # Real jobs are advanced by the processing worker (app.jobs.worker).
         for j in self.db.scalars(select(JobRecord).where(JobRecord.state == "running")):
             if j.state != "running":
                 continue
@@ -441,42 +445,59 @@ class Store:
                 if stage in self.fail_next:
                     self.fail_next.remove(stage)
                     code = "TRANSCRIPTION_FAILED" if stage == "transcribing" else "ANALYSIS_FAILED"
-                    j.update(state="failed_retryable", failureCode=code, finishedAt=end)
-                    p.sourceExpiresAt = (
-                        p.sourceExpiresAt or end + self.settings.source_retention_hours * 3_600_000
-                    )
-                    if self.db.get(TranscriptRecord, p.id) is not None:
-                        p.analysisExpiresAt = (
-                            p.analysisExpiresAt or end + self.settings.analysis_retention_days * DAY
-                        )
-                    if j.type == "analysis" and p.currentRunId:
-                        p.update(status="ready", regenError=code)
-                    else:
-                        p.update(status="failed", failureCode=code)
+                    self.fail_stage(j, p, code, end)
                     break
                 if stage == "transcribing":
                     self.build_transcript(p)
                     self.charge(p, j, p.durationSec, at=end)
                 else:
                     self.analyze(p, j.params)
-                    p.update(
-                        status="ready",
-                        failureCode=None,
-                        regenError=None,
-                        sourceExpiresAt=p.sourceExpiresAt
-                        or end + self.settings.source_retention_hours * 3_600_000,
-                        analysisExpiresAt=end + self.settings.analysis_retention_days * DAY,
-                    )
-                j.index += 1
-                j.stageStartedAt = end
-                if j.index == len(j.stages):
-                    j.update(state="succeeded", finishedAt=end)
-                else:
-                    p.status = j.stages[j.index]
+                self.stage_done(j, p, end)
             if j.state != "running":
                 self.release_job(j)
         # A clock jump can complete a job whose retention window is already over.
         self.expire()
+
+    def stage_done(self, j: JobRecord, p: ProjectRecord, at: int):
+        """Record that the current stage's work finished at `at` and move to the next."""
+        if j.stages[j.index] == "analyzing":
+            p.update(
+                status="ready",
+                failureCode=None,
+                regenError=None,
+                sourceExpiresAt=p.sourceExpiresAt
+                or at + self.settings.source_retention_hours * 3_600_000,
+                analysisExpiresAt=at + self.settings.analysis_retention_days * DAY,
+            )
+        j.index += 1
+        j.update(stageStartedAt=at, stageProgress=None, leaseOwner=None, leaseUntil=None)
+        if j.index == len(j.stages):
+            j.update(state="succeeded", finishedAt=at)
+            self.release_job(j)
+        else:
+            p.status = j.stages[j.index]
+
+    def fail_stage(self, j: JobRecord, p: ProjectRecord, code: str, at: int):
+        retryable = code not in NON_RETRYABLE
+        j.update(
+            state="failed_retryable" if retryable else "failed",
+            failureCode=code,
+            finishedAt=at,
+            leaseOwner=None,
+            leaseUntil=None,
+        )
+        self.release_job(j)
+        p.sourceExpiresAt = (
+            p.sourceExpiresAt or at + self.settings.source_retention_hours * 3_600_000
+        )
+        if self.db.get(TranscriptRecord, p.id) is not None:
+            p.analysisExpiresAt = (
+                p.analysisExpiresAt or at + self.settings.analysis_retention_days * DAY
+            )
+        if j.type == "analysis" and p.currentRunId:
+            p.update(status="ready", regenError=code)
+        else:
+            p.update(status="failed", failureCode=code)
 
     def stage_ms(self, stage: str) -> int:
         seconds = (
@@ -486,13 +507,22 @@ class Store:
         )
         return max(1, round(seconds * 1000))
 
+    def stage_fraction(self, j: JobRecord, stage: str) -> float:
+        if j.stageProgress is not None:
+            return j.stageProgress  # reported by the processing worker
+        if self.settings.processing_mode != "demo" and stage == "transcribing":
+            return 0.0  # no estimate until the worker starts decoding
+        return min(1, max(0, (self.now() - j.stageStartedAt) / self.stage_ms(stage)))
+
     def status(self, p: ProjectRecord) -> dict:
         j = self.project_job(p.id)
         running = j is not None and j.state == "running"
         stage = j.stages[j.index] if running else None
         progress = 1.0 if p.status == "ready" else 0.0
         if running:
-            fraction = min(1, max(0, (self.now() - j.stageStartedAt) / self.stage_ms(stage)))
+            fraction = self.stage_fraction(j, stage)
+            if self.settings.processing_mode != "demo" and stage == "analyzing":
+                fraction = min(fraction, 0.95)  # done only when the worker says so
             progress = (
                 fraction
                 if j.type == "analysis"
@@ -510,7 +540,7 @@ class Store:
             "failureCode": p.failureCode,
             "regenError": p.regenError,
             "canCancel": bool(running and j.type == "process"),
-            "canRetry": p.status == "failed",
+            "canRetry": p.status == "failed" and p.failureCode not in NON_RETRYABLE,
         }
 
     def start(
@@ -539,6 +569,8 @@ class Store:
             previous = self.project_job(p.id)
             if p.status != "failed" or not previous:
                 raise ApiError("INVALID_STATE", "Only failed projects can be retried.", 409)
+            if p.failureCode in NON_RETRYABLE:
+                raise ApiError("INVALID_STATE", "Retrying this video will not help.", 409)
             if p.sourceExpired and self.db.get(TranscriptRecord, p.id) is None:
                 raise ApiError("INVALID_STATE", "The source expired. Upload it again.", 409)
             stages = (
@@ -598,11 +630,8 @@ class Store:
         if not job or job.type != "process":
             raise ApiError("INVALID_STATE", "There is no cancelable processing job.", 409)
         if job.stages[job.index] == "transcribing":
-            fraction = min(
-                1, max(0, (self.now() - job.stageStartedAt) / self.stage_ms("transcribing"))
-            )
-            self.charge(p, job, p.durationSec * fraction)
-        job.update(state="canceled", finishedAt=self.now())
+            self.charge(p, job, p.durationSec * self.stage_fraction(job, "transcribing"))
+        job.update(state="canceled", finishedAt=self.now(), leaseOwner=None, leaseUntil=None)
         self.release_job(job)
         p.update(
             status="canceled",
@@ -613,7 +642,17 @@ class Store:
         return self.status(p)
 
     def purge_content(self, p: ProjectRecord):
+        record = self.db.get(TranscriptRecord, p.id)
+        digest = record.sourceDigest if record else None
         self.db.execute(delete(TranscriptRecord).where(TranscriptRecord.projectId == p.id))
+        # The cached transcript is shared by projects with the same source file;
+        # remove it with the last transcript that refers to it.
+        if digest and not self.db.scalar(
+            select(TranscriptRecord.projectId).where(TranscriptRecord.sourceDigest == digest)
+        ):
+            from .transcription import remove_cached
+
+            remove_cached(self.settings.media_dir, digest)
         self.db.execute(delete(IdempotencyRecord).where(IdempotencyRecord.projectId == p.id))
         self.db.execute(delete(AnalysisRunRecord).where(AnalysisRunRecord.projectId == p.id))
         self.db.execute(update(JobRecord).where(JobRecord.projectId == p.id).values(params={}))

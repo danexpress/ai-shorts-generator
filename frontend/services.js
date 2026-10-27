@@ -41,6 +41,7 @@
     MEDIA_PROBE_FAILED: 'We couldn’t read this video. Re-export it and try again.',
     TRANSCRIPTION_FAILED: 'Transcription failed. Retry — your upload is kept.',
     ANALYSIS_FAILED: 'Finding clips failed. Retry — your transcript is kept.',
+    NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
     IMPORT_UNAVAILABLE: 'URL import isn’t available right now. Upload the video file instead.',
     UNSUPPORTED_URL: 'Only public youtube.com or youtu.be video links are supported.',
     DOWNLOAD_FAILED: 'The video could not be downloaded from YouTube. Try uploading the file instead.',

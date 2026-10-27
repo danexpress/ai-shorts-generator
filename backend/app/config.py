@@ -27,6 +27,23 @@ class Settings:
             os.environ.get("SEED_DEMO_DATA", "true").lower() in {"1", "true", "yes"}
         )
     )
+    # "local" runs real transcription in `make worker`; "demo" keeps the clock-driven
+    # simulator (canned transcript, no worker needed).
+    processing_mode: str = field(
+        default_factory=lambda: os.environ.get("PROCESSING_MODE", "local").strip().lower()
+    )
+    whisper_model: str = field(default_factory=lambda: os.environ.get("WHISPER_MODEL", "small"))
+    whisper_device: str = field(default_factory=lambda: os.environ.get("WHISPER_DEVICE", "auto"))
+    whisper_compute_type: str = field(
+        default_factory=lambda: os.environ.get("WHISPER_COMPUTE_TYPE", "auto")
+    )
+    # Empty means auto-detect the spoken language.
+    whisper_language: str = field(default_factory=lambda: os.environ.get("WHISPER_LANGUAGE", ""))
+    # "whisperx" adds forced alignment (install with `uv sync --extra align`).
+    whisper_align: str = field(
+        default_factory=lambda: os.environ.get("WHISPER_ALIGN", "").strip().lower()
+    )
+    job_lease_seconds: int = 300
     token_ttl_seconds: int = 3600
     upload_ttl_seconds: int = 900
     transcription_seconds: float = 4

@@ -124,6 +124,8 @@ class TranscriptRecord(Base):
     revision: Mapped[int] = mapped_column(Integer)
     userCorrected: Mapped[bool] = mapped_column("user_corrected", Boolean)
     segments: Mapped[list] = mapped_column(JSON)
+    # SHA-256 of the source file; links the record to its reusable transcript cache file.
+    sourceDigest: Mapped[str | None] = mapped_column("source_digest", String(64))
 
 
 class AnalysisRunRecord(Base):
@@ -156,6 +158,10 @@ class JobRecord(Base):
     finishedAt: Mapped[int | None] = mapped_column("finished_at", BigInteger)
     failureCode: Mapped[str | None] = mapped_column("failure_code", String(60))
     idempotencyKey: Mapped[str | None] = mapped_column("idempotency_key", String(255))
+    # Processing-worker lease and real progress of the current stage (0–1).
+    leaseOwner: Mapped[str | None] = mapped_column("lease_owner", String(40))
+    leaseUntil: Mapped[int | None] = mapped_column("lease_until", BigInteger)
+    stageProgress: Mapped[float | None] = mapped_column("stage_progress", Float)
 
 
 class ActiveJobRecord(Base):
