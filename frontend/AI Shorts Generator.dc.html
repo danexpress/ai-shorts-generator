@@ -621,7 +621,8 @@ class Component extends DCLogic {
     const unlimitedUsage = usage.limitMinutes === null;
     const remaining = usage.remainingMinutes;
     const srcMin = src ? Math.ceil(src.durationSec / 60) : 0;
-    const canStart = !np.busy && !np.probing && (np.tab === 'upload' ? !!src : !!np.url.trim() && np.rights);
+    const urlImportOn = !!(me && me.features.youtubeImport);
+    const canStart = !np.busy && !np.probing && (np.tab === 'upload' ? !!src : urlImportOn && !!np.url.trim() && np.rights);
     const tabBtn = (id, label) => ({ label, pressed: String(np.tab === id), bg: np.tab === id ? 'var(--color-accent)' : 'transparent', fg: np.tab === id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => this.setNp({ tab: id, error: null, code: null }) });
 
     // processing
@@ -754,8 +755,9 @@ class Component extends DCLogic {
       activeJobName: activeProj ? activeProj.name : '', activeJobStage: activeProj ? (STATUS_LABEL[activeProj.status] || '') + '…' : '',
       openActive: () => activeProj && this.openProject(activeProj),
       // new project
-      tabs: [tabBtn('upload', 'Upload video'), ...(me && me.features.youtubeImport ? [tabBtn('url', 'YouTube URL')] : [])],
-      isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', urlImportOff: !(me && me.features.youtubeImport),
+      // The URL option is always shown; when the server has import off it explains why.
+      tabs: [tabBtn('upload', 'Upload video'), tabBtn('url', 'YouTube URL')],
+      isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', urlImportOff: !urlImportOn,
       noSource: !src && !np.probing, probing: np.probing, hasSource: !!src,
       srcName: src ? src.title : '', srcFile: src ? src.fileName : '',
       srcSpecs: src ? [

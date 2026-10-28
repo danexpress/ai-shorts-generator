@@ -301,9 +301,15 @@ test('page uses the HTTP client, password form state and server feature flags', 
   await page.signIn({ preventDefault() {} });
   assert.equal(page.state.route, 'dashboard');
   assert.equal(page.state.loginPassword, '');
-  assert.equal(page.renderVals().tabs.length, 1);
+  // The URL tab is always visible; with import off it cannot start a project.
+  assert.equal(page.renderVals().tabs.length, 2);
+  page.setNp({ tab: 'url', url: 'https://youtu.be/abcdefghijk', rights: true });
+  assert.equal(page.renderVals().urlImportOff, true);
+  assert.equal(page.renderVals().cannotStart, true);
   page.setState({ me: { ...session, features: { youtubeImport: true } } });
   assert.equal(page.renderVals().tabs.length, 2);
+  assert.equal(page.renderVals().cannotStart, false);
+  page.setNp({ tab: 'upload', url: '', rights: false });
   page.setState({ projects: [{ id: 'private' }], transcript: { segments: [] } });
   options[0].onCall({ method: 'getTranscript', ok: false, code: 'UNAUTHENTICATED' });
   assert.equal(page.state.route, 'login');
@@ -384,7 +390,8 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   await page.loadTranscript(ready.id);
   assert.ok(page.state.clipsRes.clips.length > 0);
   assert.ok(page.state.transcript.segments.length > 0);
-  assert.equal(page.renderVals().tabs.length, 1);
+  assert.equal(page.renderVals().tabs.length, 2);
+  assert.equal(page.renderVals().urlImportOff, true);  // the isolated backend has import off
   page.setState({ pendingFile: new Blob([new Uint8Array(12)], { type: 'video/mp4' }) });
   page.setNp({ source: { fileName: 'demo.mp4', title: 'HTTP integration demo', mimeType: 'video/mp4', sizeBytes: 12, durationSec: 300, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true } });
   await page.start();
@@ -447,7 +454,7 @@ test('render failure keeps the editing workspace and offers a readable error', a
 test('URL creation requires rights confirmation, and upload probing prevents submission', t => {
   const page = component(S);
   t.after(() => page.componentWillUnmount());
-  page.setState({ me: session });
+  page.setState({ me: { ...session, features: { youtubeImport: true } } });
   page.setNp({ tab: 'url', url: 'https://youtube.com/watch?v=example' });
   assert.equal(page.renderVals().cannotStart, true);
   page.setNp({ rights: true });

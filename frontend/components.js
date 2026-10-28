@@ -822,6 +822,12 @@
           : h(
               "div",
               { className: "stack" },
+              v.urlImportOff &&
+                h(
+                  "p",
+                  { className: "notice", role: "status" },
+                  "YouTube import is turned off on this server. Upload the video file instead, or ask the server admin to set YOUTUBE_IMPORT=true.",
+                ),
               h(
                 Field,
                 {
