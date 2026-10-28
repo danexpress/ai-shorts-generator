@@ -35,6 +35,7 @@ class Component extends DCLogic {
   state = {
     route: 'boot', bootError: null, me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
     authOptions: { google: false, password: true },
+    accountDeletion: { confirm: '', busy: false, error: null },
     projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -94,6 +95,21 @@ class Component extends DCLogic {
     window.location.assign(window.ShortsServices.googleSignInUrl(window.SHORTS_CONFIG.apiBaseUrl || ''));
   }
 
+  async deleteAccount() {
+    const { accountDeletion: d, me } = this.state;
+    if (d.busy || !me || d.confirm.trim().toLowerCase() !== me.user.email.toLowerCase()) return;
+    this.setState({ accountDeletion: { ...d, busy: true, error: null } });
+    try {
+      const result = await this.api.deleteAccount({ confirmEmail: d.confirm.trim() });
+      const names = { youtube: 'YouTube', tiktok: 'TikTok', x: 'X', instagram: 'Instagram' };
+      const pending = result.notRevokedPlatforms.map((p) => names[p] || p);
+      this.resetSession('Your account and its data were deleted. Posts already published on social platforms stay up.'
+        + (pending.length ? ' We couldn’t revoke this app’s access at ' + pending.join(', ') + ' — remove it in that platform’s settings.' : ''));
+    } catch (e) {
+      if (!this.handleAuth(e)) this.setState((s) => ({ accountDeletion: { ...s.accountDeletion, busy: false, error: e.message } }));
+    }
+  }
+
   async restoreSession() {
     const request = this.sessionRequest = (this.sessionRequest || 0) + 1;
     this.setState({ route: 'boot', bootError: null });
@@ -146,7 +162,8 @@ class Component extends DCLogic {
       captions: { clipId: null, track: null, draft: null, loading: false, error: null, saving: false, dirty: false, confirmReset: false, texts: {} },
       dashboardError: null, clipsError: null, transcriptError: null, usageError: null,
       np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
-      regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null });
+      regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null,
+      accountDeletion: { confirm: '', busy: false, error: null } });
   }
   async signOut() {
     this.sessionRequest = (this.sessionRequest || 0) + 1;
@@ -763,6 +780,12 @@ class Component extends DCLogic {
       onLoginEmail: (e) => this.setState({ loginEmail: e.target.value }),
       onLoginPassword: (e) => this.setState({ loginPassword: e.target.value }),
       signIn: (e) => this.signIn(e),
+      accountDeletion: {
+        ...s.accountDeletion,
+        canDelete: !!me && !s.accountDeletion.busy && s.accountDeletion.confirm.trim().toLowerCase() === me.user.email.toLowerCase(),
+        onConfirm: (e) => { const confirm = e.target.value; this.setState((x) => ({ accountDeletion: { ...x.accountDeletion, confirm, error: null } })); },
+        submit: (e) => { e?.preventDefault?.(); return this.deleteAccount(); },
+      },
       googleEnabled: s.authOptions.google, passwordEnabled: s.authOptions.password,
       signInWithGoogle: () => this.signInWithGoogle(),
       // shell

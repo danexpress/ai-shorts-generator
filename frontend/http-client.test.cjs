@@ -686,3 +686,39 @@ test('LLM highlights without sub-scores show one engagement score and signal not
   assert.equal(demo.scores.length, 4);
   assert.equal(demo.signalNote, '');
 });
+
+test('account deletion needs the exact email, then signs out with a clear summary', async (t) => {
+  const calls = [];
+  const page = component({ ...S, createApi: () => ({
+    deleteAccount: async (body) => { calls.push(body); return { ok: true, revokedPlatforms: ['youtube'], notRevokedPlatforms: ['tiktok'] }; },
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, route: 'settings' });
+  const v = () => page.renderVals().appProps.v;
+  v().accountDeletion.onConfirm({ target: { value: 'someone@example.com' } });
+  assert.equal(v().accountDeletion.canDelete, false);
+  await page.deleteAccount();
+  assert.equal(calls.length, 0);
+  v().accountDeletion.onConfirm({ target: { value: ' MAYA@example.com ' } });
+  assert.equal(v().accountDeletion.canDelete, true);
+  await v().accountDeletion.submit();
+  assert.equal(JSON.stringify(calls), JSON.stringify([{ confirmEmail: 'MAYA@example.com' }]));
+  assert.equal(page.state.route, 'login');
+  assert.equal(page.state.me, null);
+  assert.match(page.state.loginError, /deleted/);
+  assert.match(page.state.loginError, /TikTok/);
+  assert.equal(page.state.accountDeletion.confirm, '');
+});
+
+test('the HTTP client sends account deletion as DELETE with a JSON body and CSRF token', async () => {
+  const { calls, fetch } = recorder();
+  const api = S.createHttpApi({ baseUrl: 'http://api.test', fetch });
+  await api.signIn({ email: 'maya@example.com', password: 'secret' });
+  await api.deleteAccount({ confirmEmail: 'maya@example.com' });
+  const call = calls.at(-1);
+  assert.equal(call.method, 'DELETE');
+  assert.equal(call.url, 'http://api.test/v1/me');
+  assert.equal(call.headers['X-CSRF-Token'], 'csrf-1');
+  assert.deepEqual(JSON.parse(call.body), { confirmEmail: 'maya@example.com' });
+});

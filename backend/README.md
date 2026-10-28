@@ -51,6 +51,8 @@ Browsers sign in with **Google** (when configured) or, while `ALLOW_PASSWORD_LOG
 
 **CSRF**: cookie-authenticated POST/PATCH/DELETE requests must send the session's `csrfToken` (returned by sign-in and `GET /v1/me`) in `X-CSRF-Token` and come from an allowed Origin (`CORS_ORIGINS` or `BACKEND_PUBLIC_URL`). The frontend keeps the token in memory only and stores nothing in browser storage.
 
+**Account deletion**: Settings → *Delete account* (or `DELETE /v1/me` with `{"confirmEmail": "<the account email>"}`) permanently deletes the user and everything it owns in one transaction (`app/account_deletion.py`). That covers projects and their source/render/transcript files (processing and queued posts are cancelled first), captions, sessions and tokens, social connections with their encrypted platform tokens, publishing history, usage and events. Rows are found by following foreign keys from the user, so new tables are covered automatically. After the commit each platform is asked to revoke its access token; failures are listed in `notRevokedPlatforms` and shown to the user, but the stored tokens are deleted either way. Posts already published on platforms are not deleted. Cookie sessions need the CSRF token, and the session cookies are cleared.
+
 **Bearer tokens**: password login also returns an `access_token` (1 hour, revocable with logout) for scripts and API clients; bearer requests don't use cookies or CSRF.
 
 ```sh

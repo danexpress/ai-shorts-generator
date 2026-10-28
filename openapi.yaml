@@ -97,6 +97,37 @@ paths:
           $ref: '#/components/responses/Error403'
         '500':
           $ref: '#/components/responses/Error500'
+    delete:
+      operationId: deleteAccount
+      tags:
+      - Authentication
+      summary: Permanently delete the account
+      description: 'Deletes the user and everything it owns in one transaction: projects and media files (processing
+        and queued posts are cancelled), transcripts, captions, renders, sessions and tokens, social connections
+        and their encrypted platform tokens, publishing history, usage and events. Afterwards each platform is asked
+        to revoke its token (best effort). Posts already published on platforms are not deleted. Clears the session
+        cookies.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountDeletion'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeleted'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
   /v1/uploads:
     post:
       operationId: createUpload
@@ -3243,6 +3274,39 @@ components:
         expiresIn:
           type: integer
           description: Seconds until the new access cookie expires.
+    AccountDeletion:
+      type: object
+      additionalProperties: false
+      required:
+      - confirmEmail
+      properties:
+        confirmEmail:
+          type: string
+          minLength: 3
+          maxLength: 254
+          description: The account's email, re-typed to confirm.
+    AccountDeleted:
+      type: object
+      required:
+      - ok
+      - revokedPlatforms
+      - notRevokedPlatforms
+      properties:
+        ok:
+          type: boolean
+          enum:
+          - true
+        revokedPlatforms:
+          type: array
+          items:
+            type: string
+          description: Connections whose tokens were deleted and revoked at the platform.
+        notRevokedPlatforms:
+          type: array
+          items:
+            type: string
+          description: Connections whose stored tokens were deleted but platform revocation failed; remove the app's
+            access in that platform's settings.
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

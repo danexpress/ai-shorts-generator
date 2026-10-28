@@ -1975,3 +1975,16 @@ details[open] > summary {
   flex: 1;
   border-top: 1px solid var(--line);
 }
+/* ---------- account deletion ---------- */
+.danger-zone h2 {
+  color: var(--danger);
+}
+.btn.danger {
+  align-self: flex-start;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn.danger:disabled {
+  opacity: 0.5;
+}

@@ -51,6 +51,7 @@
     LOGIN_STATE_INVALID: 'That sign-in link expired. Start again from this page.',
     ACCOUNT_CONFLICT: 'This email is already linked to a different Google account.',
     PASSWORD_LOGIN_DISABLED: 'Sign in with Google.',
+    CONFIRMATION_MISMATCH: 'Type your account email exactly to confirm.',
     CSRF_FAILED: 'For your security, refresh the page and try again.',
     NO_HIGHLIGHTS: 'We couldn’t find a 20–40 second moment that works as a standalone Short in this video. Try a longer video with more speech.',
     NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
@@ -106,6 +107,7 @@
     ['signIn', 'POST', '/v1/auth/google'],
     ['signOut', 'POST', '/v1/auth/logout'],
     ['me', 'GET', '/v1/me'],
+    ['deleteAccount', 'DELETE', '/v1/me'],
     ['createUpload', 'POST', '/v1/uploads'],
     ['uploadMedia', 'POST', '/v1/uploads/{id}/media'],
     ['completeUpload', 'POST', '/v1/uploads/{id}/complete'],
@@ -699,6 +701,12 @@
       signOut: () => op(() => { session = null; return { ok: true }; }),
       me: () => op(() => meView(requireUser())),
       getAuthOptions: () => op(() => ({ google: false, password: true })),
+      deleteAccount: (body) => op(() => {
+        const u = requireUser();
+        if (String((body && body.confirmEmail) || '').trim().toLowerCase() !== u.email) throw new ApiError('CONFIRMATION_MISMATCH', null, 422);
+        u.state = 'deleted'; session = null;
+        return { ok: true, revokedPlatforms: [], notRevokedPlatforms: [] };
+      }),
       refreshSession: () => op(() => { requireUser(); return { csrfToken: 'mock-csrf', expiresIn: 900 }; }),
 
       createUpload: (body) => op(() => {

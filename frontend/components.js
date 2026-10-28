@@ -2204,6 +2204,39 @@
       ),
       h(
         "section",
+        { className: "panel pad mt-5 stack danger-zone", "aria-labelledby": "delete-account" },
+        h("h2", { id: "delete-account" }, "Delete account"),
+        h(
+          "p",
+          { className: "muted small" },
+          "Permanently deletes your account, projects, videos, transcripts, renders, publishing history and connected social accounts (their stored access is deleted and revoked). This can’t be undone. Posts already published on social platforms stay up.",
+        ),
+        h(
+          "form",
+          { className: "stack compact-stack", onSubmit: v.accountDeletion.submit },
+          h(
+            Field,
+            { id: "delete-confirm", label: `Type ${v.email} to confirm` },
+            h("input", {
+              id: "delete-confirm",
+              type: "email",
+              autoComplete: "off",
+              value: v.accountDeletion.confirm,
+              onChange: v.accountDeletion.onConfirm,
+              disabled: v.accountDeletion.busy,
+            }),
+          ),
+          v.accountDeletion.error &&
+            h("p", { className: "notice error", role: "alert" }, v.accountDeletion.error),
+          h(
+            Button,
+            { type: "submit", className: "danger", disabled: !v.accountDeletion.canDelete },
+            v.accountDeletion.busy ? "Deleting…" : "Delete my account",
+          ),
+        ),
+      ),
+      h(
+        "section",
         { className: "panel pad mt-5 row between" },
         h(
           "div",

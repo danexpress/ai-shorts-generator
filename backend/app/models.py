@@ -137,6 +137,19 @@ class Session(BaseModel):
     activeJob: ActiveJob | None
 
 
+class AccountDeletion(RequestModel):
+    # Re-typed account email: a deliberate confirmation (Google users have no password).
+    confirmEmail: str = Field(min_length=3, max_length=254)
+
+
+class AccountDeleted(BaseModel):
+    ok: Literal[True] = True
+    # Platforms whose stored tokens were deleted and revoked at the provider, and
+    # those where provider revocation failed (stored tokens are deleted regardless).
+    revokedPlatforms: list[str]
+    notRevokedPlatforms: list[str]
+
+
 class AuthOptions(BaseModel):
     google: bool
     password: bool

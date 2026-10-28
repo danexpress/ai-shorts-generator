@@ -11,7 +11,17 @@ from ..auth import StoreDep, UserDep, google_user, login, token_digest
 from ..db_models import LoginStateRecord, RefreshTokenRecord
 from ..errors import ApiError
 from ..google_auth import GoogleAuthError
-from ..models import AuthOptions, LoginResponse, Ok, RefreshResult, Session, SignInRequest
+from ..models import (
+    AccountDeleted,
+    AccountDeletion,
+    AuthOptions,
+    LoginResponse,
+    Ok,
+    RefreshResult,
+    Session,
+    SignInRequest,
+)
+from ..social.security import SocialUser
 
 router = APIRouter(tags=["Authentication"])
 LOGIN_COOKIE = "shorts_login"  # binds a pending Google sign-in to this browser
@@ -176,6 +186,25 @@ def sign_out(
         sessions.revoke(store, session_id)
     sessions.clear_cookies(response, store.settings)
     return Ok()
+
+
+@router.delete("/v1/me", response_model=AccountDeleted, operation_id="deleteAccount")
+def delete_me(body: AccountDeletion, request: Request, response: Response, user_id: SocialUser):
+    """Permanently delete the account and everything it owns; see account_deletion.py.
+
+    Authenticates in its own short transaction (like the social endpoints) because the
+    deletion runs in one transaction followed by provider token revocation.
+    """
+    from ..account_deletion import delete_account
+    from ..db_models import UserRecord
+
+    with request.app.state.database.transaction() as db:
+        email = db.get(UserRecord, user_id).email
+    if body.confirmEmail.strip().lower() != email.lower():
+        raise ApiError("CONFIRMATION_MISMATCH", "Type your account email to confirm.", 422)
+    result = delete_account(request.app, user_id)
+    sessions.clear_cookies(response, request.app.state.settings)
+    return {"revokedPlatforms": result["revoked"], "notRevokedPlatforms": result["notRevoked"]}
 
 
 @router.get("/v1/me", response_model=Session, operation_id="me")
