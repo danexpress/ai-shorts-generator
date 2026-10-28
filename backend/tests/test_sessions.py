@@ -159,3 +159,15 @@ def test_password_login_can_be_disabled(database, settings, clock, enabled):
             "/v1/auth/google", json={"email": "maya@example.com", "password": "DemoPass123!"}
         )
         assert_error(response, 403, "PASSWORD_LOGIN_DISABLED")
+
+
+def test_social_endpoints_accept_cookie_sessions_with_csrf(client):
+    csrf = browser_login(client)
+    assert client.get("/v1/social-accounts").status_code == 200
+    # Writes need the CSRF token; with it, the request reaches the social service.
+    response = client.delete("/v1/social-accounts/youtube", headers=ORIGIN)
+    assert_error(response, 403, "CSRF_FAILED")
+    ok = client.delete("/v1/social-accounts/youtube", headers={**ORIGIN, "X-CSRF-Token": csrf})
+    assert ok.status_code == 200, ok.text
+    client.post("/v1/auth/logout", headers=ORIGIN)
+    assert_error(client.get("/v1/social-accounts"), 401, "UNAUTHENTICATED")

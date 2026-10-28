@@ -130,6 +130,33 @@ def session_for_access(store, access_token: str | None):
     return token, session
 
 
+def authenticate(db, request: Request, credentials, settings, now: int) -> TokenRecord:
+    """The live token for this request: bearer header first, else the session cookie.
+
+    Cookie-authenticated unsafe requests must pass the CSRF and Origin checks. Shared
+    by the main API and the social endpoints (which use their own short transactions).
+    """
+    if credentials:
+        token = db.get(TokenRecord, digest(credentials.credentials))
+        if not token or token.expiresAt <= now:
+            raise ApiError("UNAUTHENTICATED", "A valid bearer token is required.", 401)
+        return token
+    access = request.cookies.get(ACCESS_COOKIE)
+    token = db.get(TokenRecord, digest(access)) if access else None
+    session = db.get(AuthSessionRecord, token.sessionId) if token and token.sessionId else None
+    if (
+        not token
+        or token.expiresAt <= now
+        or not session
+        or session.revokedAt
+        or session.expiresAt <= now
+    ):
+        raise ApiError("UNAUTHENTICATED", "A valid bearer token is required.", 401)
+    check_csrf(request, session, settings)
+    request.state.auth_session = session
+    return token
+
+
 def check_origin(request: Request, settings):
     origin = request.headers.get("origin")
     allowed = set(settings.cors_origins) | {settings.backend_public_url}

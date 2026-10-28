@@ -8,8 +8,8 @@ from urllib.parse import parse_qs
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from fastapi import Depends, Request
 
-from ..auth import Credentials, token_digest
-from ..db_models import TokenRecord, UserRecord
+from ..auth import Credentials
+from ..db_models import UserRecord
 from ..errors import ApiError
 
 
@@ -51,12 +51,13 @@ class TokenCipher:
 
 
 def social_user(request: Request, credentials: Credentials):
+    from ..sessions import authenticate
+
     with request.app.state.database.transaction() as session:
-        token = (
-            session.get(TokenRecord, token_digest(credentials.credentials)) if credentials else None
-        )
-        user = session.get(UserRecord, token.userId) if token else None
-        if not token or token.expiresAt <= int(request.app.state.clock() * 1000) or not user:
+        now = int(request.app.state.clock() * 1000)
+        token = authenticate(session, request, credentials, request.app.state.settings, now)
+        user = session.get(UserRecord, token.userId)
+        if not user:
             raise ApiError("UNAUTHENTICATED", "Sign in to continue.", 401)
         if not user.active or not user.invited:
             raise ApiError("ACCOUNT_DISABLED", "Your account is unavailable.", 403)

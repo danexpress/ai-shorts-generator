@@ -102,19 +102,9 @@ def login(store: Store, email: str, password: str) -> tuple[UserRecord, dict]:
 
 
 def current_user(request: Request, store: StoreDep, credentials: Credentials) -> UserRecord:
-    from . import sessions
+    from .sessions import authenticate
 
-    if credentials:
-        token = store.token(token_digest(credentials.credentials))
-        if not token or token.expiresAt <= store.now():
-            raise ApiError("UNAUTHENTICATED", "A valid bearer token is required.", 401)
-    else:
-        found = sessions.session_for_access(store, request.cookies.get(sessions.ACCESS_COOKIE))
-        if not found:
-            raise ApiError("UNAUTHENTICATED", "A valid bearer token is required.", 401)
-        token, session = found
-        sessions.check_csrf(request, session, store.settings)
-        request.state.auth_session = session
+    token = authenticate(store.db, request, credentials, store.settings, store.now())
     user = store.user(token.userId)
     if not user:
         raise ApiError("UNAUTHENTICATED", "Your session ended. Sign in again.", 401)
