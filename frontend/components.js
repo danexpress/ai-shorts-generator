@@ -717,23 +717,11 @@
       ),
     );
   }
-  function UploadDropzone({ onFile, probing }) {
-    const [dragging, setDragging] = root.React.useState(false);
+  // Drops are handled page-wide by the controller; `dragging` only reflects that state.
+  function UploadDropzone({ onFile, probing, dragging }) {
     return h(
       "label",
-      {
-        className: `dropzone ${dragging ? "dragging" : ""}`,
-        onDragOver: (e) => {
-          e.preventDefault();
-          setDragging(true);
-        },
-        onDragLeave: () => setDragging(false),
-        onDrop: (e) => {
-          e.preventDefault();
-          setDragging(false);
-          if (!probing) onFile({ target: { files: e.dataTransfer.files } });
-        },
-      },
+      { className: `dropzone ${dragging ? "dragging" : ""}` },
       h("input", {
         type: "file",
         accept: ".mp4,.mov,.webm",
@@ -783,6 +771,18 @@
     return h(
       "div",
       { className: "narrow" },
+      v.fileDragOver &&
+        h(
+          "div",
+          { className: "drop-overlay", "aria-hidden": "true" },
+          h(
+            "div",
+            { className: "drop-overlay-card" },
+            h("span", { className: "empty-symbol" }, h(Icon, { name: "upload" })),
+            h("strong", null, "Drop to use this video"),
+            h("span", { className: "small muted" }, "MP4, MOV, WebM"),
+          ),
+        ),
       h(PageHeader, {
         title: "Turn a long video into publish-ready Shorts",
         description:
@@ -818,7 +818,11 @@
                   "aria-label": "Remove selected video",
                 }),
               )
-            : h(UploadDropzone, { onFile: v.onFile, probing: v.probing })
+            : h(UploadDropzone, {
+                onFile: v.onFile,
+                probing: v.probing,
+                dragging: v.fileDragOver,
+              })
           : h(
               "div",
               { className: "stack" },

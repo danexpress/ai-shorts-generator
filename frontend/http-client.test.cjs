@@ -193,6 +193,41 @@ test('an auth_error returned by Google sign-in is shown once and removed from th
   assert.deepEqual(replaced, ['/']);
 });
 
+test('a video dropped anywhere on New Project is selected, and drops elsewhere are blocked', async t => {
+  const page = component({ ...S, createApi: () => ({ getAuthOptions: async () => ({}), me: async () => session, listProjects: async () => [] }) });
+  t.after(() => page.componentWillUnmount());
+  const listeners = {};
+  Object.assign(vm.runInContext('window', vmContextOf(page)), { addEventListener: (type, fn) => { listeners[type] = fn; }, removeEventListener() {} });
+  await page.componentDidMount();
+  const picked = [];
+  page.onFile = (e) => picked.push(e.target.files[0]);
+  const file = { name: 'talk.mp4', type: 'video/mp4' };
+  const fire = (type) => { const e = { type, prevented: false, preventDefault() { this.prevented = true; }, dataTransfer: { types: ['Files'], files: [file], dropEffect: 'none' } }; listeners[type](e); return e; };
+
+  page.setState({ route: 'dashboard' });
+  fire('dragenter');
+  assert.equal(page.state.fileDragOver, undefined);
+  assert.equal(fire('drop').prevented, true);
+  assert.deepEqual(picked, []);
+
+  page.setState({ route: 'new', np: { ...page.state.np, tab: 'url' } });
+  fire('dragenter');
+  assert.equal(page.state.fileDragOver, true);
+  assert.equal(fire('dragover').dataTransfer.dropEffect, 'copy');
+  fire('drop');
+  assert.equal(page.state.fileDragOver, false);
+  assert.equal(page.state.np.tab, 'upload');
+  assert.deepEqual(picked, [file]);
+});
+
+test('choosing a non-video file shows a format error without probing it', t => {
+  const page = component({ ...S, createApi: () => ({}) });
+  t.after(() => page.componentWillUnmount());
+  page.onFile({ target: { files: [{ name: 'notes.txt', type: 'text/plain' }] } });
+  assert.equal(page.state.np.probing, false);
+  assert.match(page.state.np.error, /MP4, MOV, or WebM/);
+});
+
 function component(services, baseUrl = 'http://api.test', globals = {}) {
   const html = fs.readFileSync(path.join(__dirname, 'AI Shorts Generator.dc.html'), 'utf8');
   const script = html.match(/<script type="text\/x-dc"[^>]*>([\s\S]*?)<\/script>/)[1];

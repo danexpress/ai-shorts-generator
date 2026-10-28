@@ -21,7 +21,7 @@ Best moments shows Claude's highlight candidates with one engagement score (and,
 
 The API renders MP4 videos with burned-in karaoke captions in three caption styles, and exports TXT/JSON transcripts plus per-render SRT/ASS subtitle files. Burned-in hook text, watermark rendering and cover downloads are not implemented. Optional platform-specific social copy is now provided by the configured social copy service. Their requested UI surfaces are clearly marked unavailable. Unavailable branding controls sit in a compact disclosure so the primary workflow stays clear. The suggested hook can be copied for publishing; the UI does not fabricate platform-specific metadata or imply that disabled settings affect the exported video.
 
-Source retention is 24 hours; rendered files are retained for 7 days; analysis for 30 days. The upload contract accepts MP4/MOV/WebM, 30 seconds–3 hours, up to 4 GB. The YouTube URL option is always shown; it can start a project only when the backend enables import (`YOUTUBE_IMPORT=true`), and otherwise explains that import is turned off.
+Source retention is 24 hours; rendered files are retained for 7 days; analysis for 30 days. The upload contract accepts MP4/MOV/WebM, 30 seconds–3 hours, up to 4 GB. A video file can be dropped anywhere on New Project (on either tab, or to replace the selected video); file drops on other screens are ignored rather than opened by the browser. The YouTube URL option is always shown; it can start a project only when the backend enables import (`YOUTUBE_IMPORT=true`), and otherwise explains that import is turned off.
 
 ## Verification
 

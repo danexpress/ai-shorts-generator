@@ -59,6 +59,23 @@ class Component extends DCLogic {
       this.loadSocialAccounts().then(() => { if (this.state.route === 'publish') this.loadPublish(this.state.result, true); });
     };
     window.addEventListener?.('message', this.socialListener);
+    // Files dropped anywhere on New Project start an upload; elsewhere they are ignored instead of the browser opening them.
+    this.fileDragDepth = 0;
+    const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+    const acceptsDrop = () => this.state.route === 'new' && !this.state.np.busy && !this.state.np.probing;
+    this.dragListener = (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      if (e.type === 'dragover') { e.dataTransfer.dropEffect = acceptsDrop() ? 'copy' : 'none'; return; }
+      this.fileDragDepth = e.type === 'dragenter' ? this.fileDragDepth + 1 : e.type === 'dragleave' ? Math.max(0, this.fileDragDepth - 1) : 0;
+      const over = this.fileDragDepth > 0 && acceptsDrop();
+      if (over !== !!this.state.fileDragOver) this.setState({ fileDragOver: over });
+      if (e.type === 'drop' && acceptsDrop() && e.dataTransfer.files.length) {
+        this.setNp({ tab: 'upload' });
+        this.onFile({ target: { files: e.dataTransfer.files } });
+      }
+    };
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((t) => window.addEventListener?.(t, this.dragListener));
     try { this.setTheme(window.localStorage.getItem('shorts-theme') || 'system'); } catch (_) {}
     const boot = () => {
       if (!window.ShortsServices) return void (this.bootTimer = setTimeout(boot, 50));
@@ -73,7 +90,7 @@ class Component extends DCLogic {
     };
     return boot();
   }
-  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((t) => window.removeEventListener?.(t, this.dragListener)); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
 
   // Google sign-in returns to the app with ?auth_error=<code> on failure; never tokens.
   takeAuthError() {
@@ -444,6 +461,9 @@ class Component extends DCLogic {
   onFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file || this.state.np.busy) return;
+    if (!/\.(mp4|mov|webm)$/i.test(file.name) && !['video/mp4', 'video/quicktime', 'video/webm'].includes(file.type)) {
+      this.setNp({ error: 'Choose an MP4, MOV, or WebM video.', code: null }); return;
+    }
     const version = this.probeVersion = (this.probeVersion || 0) + 1;
     if (this.state.pendingPreviewUrl && typeof URL !== 'undefined') URL.revokeObjectURL(this.state.pendingPreviewUrl);
     this.setNp({ probing: true, error: null, code: null, source: null });
@@ -806,7 +826,7 @@ class Component extends DCLogic {
       // The URL option is always shown; when the server has import off it explains why.
       tabs: [tabBtn('upload', 'Upload video'), tabBtn('url', 'YouTube URL')],
       isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', urlImportOff: !urlImportOn,
-      noSource: !src && !np.probing, probing: np.probing, hasSource: !!src,
+      noSource: !src && !np.probing, probing: np.probing, hasSource: !!src, fileDragOver: !!s.fileDragOver,
       srcName: src ? src.title : '', srcFile: src ? src.fileName : '',
       srcSpecs: src ? [
         { label: 'Duration', value: src.durationSec ? fmt(src.durationSec) : 'Unreadable' },
