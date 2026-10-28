@@ -38,7 +38,20 @@ These credentials are for local development only.
 
 ## Authentication
 
-`POST /v1/auth/google` keeps its historical path but accepts email and password. It does not perform Google OAuth. Login returns the session details plus `access_token`, `token_type`, and `expires_in`.
+Browsers sign in with **Google** (when configured) or, while `ALLOW_PASSWORD_LOGIN=true` (the default, for the demo accounts and local development), with email and password. Turn password login off in production.
+
+**Google Sign-In** is the OpenID Connect authorization-code flow with PKCE (`app/google_auth.py`):
+
+1. `GET /v1/auth/google/start` stores a single-use state, nonce and PKCE verifier, binds them to the browser with a short-lived httpOnly cookie, and redirects to Google requesting only `openid email profile`. YouTube upload access is requested later, only when the creator connects YouTube (incremental authorization).
+2. `GET /v1/auth/google/callback` consumes the state, exchanges the code, and verifies the ID token server-side: RS256 signature against Google's published keys (cached, refetched when Google rotates them), issuer, audience (our client ID), expiry, nonce, and a verified email. Nothing the browser sends about the user is trusted.
+3. Users are found by Google `sub`. The first Google sign-in of an existing invited account links it by verified email; afterwards only `sub` is used, so email changes don't matter, and a different Google account can't take over a linked email. New accounts are created only for emails in `BETA_INVITE_EMAILS` (or anyone with `OPEN_SIGNUP=true`). Name and avatar are stored.
+4. The browser returns to `FRONTEND_PUBLIC_URL`, with `?auth_error=<code>` on failure. Tokens never appear in URLs.
+
+**Sessions** (`app/sessions.py`): a 15-minute access cookie (`shorts_session`) and a 30-day refresh cookie (`shorts_refresh`, sent only to `/v1/auth`), both httpOnly, `SameSite=Lax`, and `Secure` everywhere except a plain-HTTP localhost backend. `POST /v1/auth/refresh` rotates both. Each refresh token works once, and replaying a used one revokes the whole session; a second tab refreshing within 10 s gets `409 REFRESH_IN_PROGRESS` instead. Tokens are stored as SHA-256 digests. `POST /v1/auth/logout` revokes the session and clears the cookies.
+
+**CSRF**: cookie-authenticated POST/PATCH/DELETE requests must send the session's `csrfToken` (returned by sign-in and `GET /v1/me`) in `X-CSRF-Token` and come from an allowed Origin (`CORS_ORIGINS` or `BACKEND_PUBLIC_URL`). The frontend keeps the token in memory only and stores nothing in browser storage.
+
+**Bearer tokens**: password login also returns an `access_token` (1 hour, revocable with logout) for scripts and API clients; bearer requests don't use cookies or CSRF.
 
 ```sh
 curl -X POST http://127.0.0.1:8000/v1/auth/google \
@@ -46,9 +59,13 @@ curl -X POST http://127.0.0.1:8000/v1/auth/google \
   -d '{"email":"maya@example.com","password":"DemoPass123!"}'
 ```
 
-Send `Authorization: Bearer <access_token>` on protected requests. Random tokens are stored as SHA-256 digests, expire after one hour, and can be revoked using `POST /v1/auth/logout`. Token records and project access survive server restarts.
+### Setting up Google Sign-In
 
-The frontend uses password sign-in and adds the bearer token automatically. Run `make run` and `make frontend` in separate repository-root terminals, then open <http://127.0.0.1:3000>. It retains the expiring token in the tab's `sessionStorage` and restores login after refresh by validating it with `/v1/me`. Logout clears browser storage and revokes the server token. Sessions still expire after one hour. Edit `frontend/config.js` if the API uses a different port. CORS defaults to ports 3000 on localhost.
+1. In Google Cloud Console → **APIs & Services → Credentials**, create an **OAuth client ID** of type **Web application**.
+2. Authorized redirect URI: `BACKEND_PUBLIC_URL/v1/auth/google/callback`, for example `http://localhost:8000/v1/auth/google/callback` locally and `https://api.example.com/v1/auth/google/callback` in production. Google accepts plain HTTP only for `localhost`.
+3. OAuth consent screen: app name, support email, privacy policy and terms URLs, scopes `openid`, `email`, `profile` (non-sensitive, so no verification review is needed for sign-in alone), and test users while in *Testing* mode. YouTube's `youtube.upload` scope is sensitive and needs Google's verification before public use; see [social publishing](../docs/social-publishing.md).
+4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BACKEND_PUBLIC_URL`, `FRONTEND_PUBLIC_URL` and `CORS_ORIGINS` (see `.env.example`), and add invited emails to `BETA_INVITE_EMAILS`.
+5. Serve the frontend and API from the same host so the browser sends the `SameSite=Lax` cookies. For example, use `localhost` for both locally (not `localhost` for one and `127.0.0.1` for the other), or `app.example.com` and `api.example.com` in production. When `apiBaseUrl` in `frontend/config.js` and `FRONTEND_PUBLIC_URL` use `localhost`, open the app at `http://localhost:3000`.
 
 ## Backend behavior
 

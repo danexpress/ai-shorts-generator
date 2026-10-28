@@ -33,13 +33,15 @@ servers:
   description: Same origin by default; createHttpApi can configure a baseUrl.
 security:
 - bearerAuth: []
+- cookieAuth: []
 paths:
   /v1/auth/google:
     post:
       operationId: signIn
       summary: Sign in to the private beta
-      description: Verify email/password against a hashed password for an active invited account. Return session
-        information and a bearer token. No session cookie is issued; this is not Google OAuth.
+      description: Email/password login, available when ALLOW_PASSWORD_LOGIN is true (otherwise 403 PASSWORD_LOGIN_DISABLED).
+        Verifies a hashed password for an active invited account, starts a cookie session (shorts_session / shorts_refresh)
+        and also returns a bearer access_token for API clients. Despite the path, Google sign-in is GET /v1/auth/google/start.
       security: []
       requestBody:
         required: true
@@ -66,8 +68,8 @@ paths:
     post:
       operationId: signOut
       summary: End the application session
-      description: 'No request body. Send Authorization: Bearer <access_token> to revoke that token. Also succeeds
-        without a token or with an invalid/expired token.'
+      description: No request body. Revokes the presented bearer token and/or this browser's cookie session (all
+        its access and refresh tokens) and clears the session cookies.
       security: []
       responses:
         '200':
@@ -1411,14 +1413,121 @@ paths:
         '500': *id007
         '422':
           $ref: '#/components/responses/Error422'
+  /v1/auth/options:
+    get:
+      operationId: getAuthOptions
+      tags:
+      - Authentication
+      summary: Sign-in methods offered by this server
+      security: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthOptions'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/auth/google/start:
+    get:
+      operationId: startGoogleSignIn
+      tags:
+      - Authentication
+      summary: Begin Google sign-in
+      security: []
+      description: Redirects to Google requesting only openid email profile, with single-use state, a nonce and
+        a PKCE challenge bound to this browser by a short-lived httpOnly cookie. Without Google configuration, redirects
+        to the frontend with auth_error=GOOGLE_UNAVAILABLE.
+      responses:
+        '303':
+          description: To Google's consent screen.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/auth/google/callback:
+    get:
+      operationId: finishGoogleSignIn
+      tags:
+      - Authentication
+      summary: Google sign-in callback
+      security: []
+      description: Consumes the state, exchanges the code, and verifies the ID token server-side (signature against
+        Google's keys, issuer, audience, expiry, nonce, verified email). Users are found by Google sub; an invited
+        account is linked by verified email on first sign-in. Sets session cookies and redirects to the frontend,
+        or redirects with auth_error=<code>. Never returns tokens in the URL.
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: error
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '303':
+          description: To the frontend.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags:
+      - Authentication
+      summary: Rotate the session cookies
+      security: []
+      description: Uses the shorts_refresh cookie (path /v1/auth). Each refresh token works once and is replaced.
+        Replaying a used token revokes the whole session (401); a second refresh racing within 10 s returns 409
+        REFRESH_IN_PROGRESS without revoking.
+      responses:
+        '200':
+          description: New cookies set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResult'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '500':
+          $ref: '#/components/responses/Error500'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Obtain access_token using email/password at POST /v1/auth/google. Tokens expire after expires_in
-        seconds and are revocable with logout.
+      description: 'API clients: obtain access_token from POST /v1/auth/google (email/password, when enabled). Tokens
+        expire after expires_in seconds and are revocable with logout.'
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: shorts_session
+      description: 'Browsers: httpOnly session cookie set by Google sign-in or password login, valid 15 minutes
+        and renewed with POST /v1/auth/refresh. Unsafe methods also require the session''s csrfToken in X-CSRF-Token
+        and an allowed Origin.'
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -1504,6 +1613,13 @@ components:
           enum:
           - creator
           - operator
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        googleLinked:
+          type: boolean
+          description: Signed in with Google at least once.
     UsageSummary:
       type: object
       required:
@@ -1658,6 +1774,10 @@ components:
               - transcribing
               - analyzing
           nullable: true
+        csrfToken:
+          type: string
+          nullable: true
+          description: Present for cookie sessions; send it as X-CSRF-Token on POST, PATCH and DELETE.
     Project:
       type: object
       required:
@@ -3102,6 +3222,27 @@ components:
               description: Widest caption line as a fraction of frame width; longer lines shrink.
           description: Sizes are pixels on the 1080x1920 canvas; position is the vertical centre as a fraction of
             height.
+    AuthOptions:
+      type: object
+      required:
+      - google
+      - password
+      properties:
+        google:
+          type: boolean
+        password:
+          type: boolean
+    RefreshResult:
+      type: object
+      required:
+      - csrfToken
+      - expiresIn
+      properties:
+        csrfToken:
+          type: string
+        expiresIn:
+          type: integer
+          description: Seconds until the new access cookie expires.
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

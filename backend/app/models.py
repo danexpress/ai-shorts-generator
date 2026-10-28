@@ -97,6 +97,8 @@ class User(BaseModel):
     email: str
     displayName: str
     role: Literal["creator", "operator"]
+    avatarUrl: str | None = None
+    googleLinked: bool = False
 
 
 class UsageSummary(BaseModel):
@@ -129,9 +131,20 @@ class ActiveJob(BaseModel):
 
 class Session(BaseModel):
     user: User
+    csrfToken: str | None = None
     features: dict[str, bool]
     usage: UsageSummary
     activeJob: ActiveJob | None
+
+
+class AuthOptions(BaseModel):
+    google: bool
+    password: bool
+
+
+class RefreshResult(BaseModel):
+    csrfToken: str
+    expiresIn: int
 
 
 class LoginResponse(Session):

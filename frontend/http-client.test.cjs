@@ -20,199 +20,177 @@ function memoryStorage() {
   };
 }
 
-test('refresh restores only the expiring token and scopes it to the backend URL', async () => {
-  const storage = memoryStorage();
+// Cookie sessions: the browser holds httpOnly cookies; the client keeps only the
+// session's CSRF token in memory and never writes to browser storage.
+const signedIn = { ...session, csrfToken: 'csrf-1', access_token: 'api-token', expires_in: 3600 };
+
+function recorder(routes = {}) {
   const calls = [];
   const fetch = async (url, init) => {
     calls.push({ url, ...init });
-    return response(url.endsWith('/google') ? { ...session, access_token: 'saved-token', expires_in: 3600 } : session);
-  };
-  const original = S.createHttpApi({ baseUrl: 'http://api.test/', storage, fetch });
-  await original.signIn({ email: 'maya@example.com', password: 'secret' });
-  assert.equal(storage.items.size, 1);
-  const saved = JSON.parse([...storage.items.values()][0]);
-  assert.deepEqual(Object.keys(saved).sort(), ['accessToken', 'expiresAt']);
-  assert.equal(saved.accessToken, 'saved-token');
-  assert.ok(saved.expiresAt > Date.now());
-  const reloaded = S.createHttpApi({ baseUrl: 'http://api.test', storage, fetch });
-  await reloaded.me();
-  assert.equal(calls.at(-1).headers.Authorization, 'Bearer saved-token');
-  const otherBackend = S.createHttpApi({ baseUrl: 'http://other-api.test', storage, fetch });
-  await otherBackend.me();
-  assert.equal(calls.at(-1).headers.Authorization, undefined);
-});
-
-test('logout removes the stored token before the network finishes, even when offline', async () => {
-  const storage = memoryStorage();
-  let rejectLogout;
-  let lastHeaders;
-  const fetch = async (url, init) => {
-    lastHeaders = init.headers;
-    if (url.endsWith('/google')) return response({ access_token: 'token', expires_in: 3600 });
-    if (url.endsWith('/logout')) return new Promise((resolve, reject) => { rejectLogout = reject; });
+    const path = new URL(url, 'http://api.test').pathname;
+    const route = routes[path];
+    if (route) return typeof route === 'function' ? route(init, calls) : route;
+    if (path === '/v1/auth/google') return response(signedIn);
     return response(session);
   };
-  const api = S.createHttpApi({ storage, fetch });
-  await api.signIn({ email: 'maya@example.com', password: 'secret' });
-  const pending = api.signOut();
-  assert.equal(lastHeaders.Authorization, 'Bearer token');
-  assert.equal(storage.items.size, 0);
-  const reloaded = S.createHttpApi({ storage, fetch });
-  await reloaded.me();
-  assert.equal(lastHeaders.Authorization, undefined);
-  rejectLogout(new Error('offline'));
-  await assert.rejects(pending, { code: 'NETWORK_ERROR' });
-  assert.equal(storage.items.size, 0);
-});
-
-for (const saved of ['{invalid json', 'null', JSON.stringify({ accessToken: 'old-token', expiresAt: Date.now() - 1000 }), JSON.stringify({ accessToken: 'token' })]) {
-  test(`refresh discards an invalid or expired saved session: ${saved}`, async () => {
-    const storage = memoryStorage();
-    storage.setItem('shorts-session:same-origin', saved);
-    let headers;
-    const api = S.createHttpApi({ storage, fetch: async (url, init) => { headers = init.headers; return response(session); } });
-    await api.me();
-    assert.equal(headers.Authorization, undefined);
-    assert.equal(storage.items.size, 0);
-  });
+  return { calls, fetch };
 }
 
-test('blocked browser storage still allows login and authenticated requests in memory', async () => {
-  const storage = Object.fromEntries(['getItem', 'setItem', 'removeItem'].map(name => [name, () => { throw new Error('Storage blocked'); }]));
-  let headers;
-  const api = S.createHttpApi({ storage, fetch: async (url, init) => {
-    headers = init.headers;
-    return response(url.endsWith('/google') ? { access_token: 'token', expires_in: 3600 } : session);
-  }});
+test('requests carry cookies, never a stored token, and nothing touches browser storage', async () => {
+  const storage = memoryStorage();
+  const { calls, fetch } = recorder();
+  const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch, storage });
   await api.signIn({ email: 'maya@example.com', password: 'secret' });
   await api.me();
-  assert.equal(headers.Authorization, 'Bearer token');
-  await api.signOut();
-  await api.me();
-  assert.equal(headers.Authorization, undefined);
-});
-
-test('a temporary network failure preserves the stored session for retry', async () => {
-  const storage = memoryStorage();
-  let offline = false;
-  let headers;
-  const fetch = async (url, init) => {
-    headers = init.headers;
-    if (offline) throw new Error('offline');
-    return response(url.endsWith('/google') ? { access_token: 'token', expires_in: 3600 } : session);
-  };
-  await S.createHttpApi({ storage, fetch }).signIn({ email: 'maya@example.com', password: 'secret' });
-  const reloaded = S.createHttpApi({ storage, fetch });
-  offline = true;
-  await assert.rejects(reloaded.me(), { code: 'NETWORK_ERROR' });
-  assert.equal(storage.items.size, 1);
-  offline = false;
-  await reloaded.me();
-  assert.equal(headers.Authorization, 'Bearer token');
-});
-
-test('a delayed login cannot recreate a stored session after logout', async () => {
-  const storage = memoryStorage();
-  let resolveLogin;
-  const api = S.createHttpApi({ storage, fetch: async url => {
-    if (url.endsWith('/google')) return new Promise(resolve => { resolveLogin = resolve; });
-    return response({ ok: true });
-  }});
-  const pending = api.signIn({ email: 'maya@example.com', password: 'secret' });
-  await api.signOut();
-  resolveLogin(response({ access_token: 'late-token', expires_in: 3600 }));
-  await assert.rejects(pending, { code: 'SESSION_CHANGED' });
   assert.equal(storage.items.size, 0);
+  for (const call of calls) {
+    assert.equal(call.credentials, 'include');
+    assert.equal(call.headers.Authorization, undefined);
+  }
+  assert.deepEqual(JSON.parse(calls[0].body), { email: 'maya@example.com', password: 'secret' });
 });
 
-test('HTTP login sends a password, attaches the token, and revokes it on logout', async () => {
-  const calls = [];
-  const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch: async (url, init) => {
-    calls.push({ url, ...init });
-    return response(url.endsWith('/google') ? { ...session, access_token: 'demo-token' } : { ok: true });
-  }});
+test('the CSRF token from sign-in or /me is sent on writes only', async () => {
+  const { calls, fetch } = recorder({ '/v1/me': response({ ...session, csrfToken: 'csrf-from-me' }) });
+  const api = S.createHttpApi({ baseUrl: 'http://api.test', fetch });
   await api.signIn({ email: 'maya@example.com', password: 'secret' });
   await api.processProject('prj 1', { goal: 'viral' }, { idempotencyKey: 'one' });
-  await api.signOut();
-  await api.me();
-  assert.deepEqual(JSON.parse(calls[0].body), { email: 'maya@example.com', password: 'secret' });
-  assert.equal(calls[0].headers.Authorization, undefined);
   assert.equal(calls[1].url, 'http://api.test/v1/projects/prj%201/process');
-  assert.equal(calls[1].headers.Authorization, 'Bearer demo-token');
+  assert.equal(calls[1].headers['X-CSRF-Token'], 'csrf-1');
   assert.equal(calls[1].headers['Idempotency-Key'], 'one');
-  assert.equal(calls[2].headers.Authorization, 'Bearer demo-token');
-  assert.equal(calls[3].headers.Authorization, undefined);
+  // After a page reload the token comes from /v1/me.
+  const reloaded = S.createHttpApi({ baseUrl: 'http://api.test', fetch });
+  await reloaded.me();
+  assert.equal(calls.at(-1).headers['X-CSRF-Token'], undefined);
+  await reloaded.getProjectPlayback('project-1');
+  assert.equal(calls.at(-1).method, 'POST');
+  assert.equal(calls.at(-1).headers['X-CSRF-Token'], 'csrf-from-me');
 });
 
-test('HTTP sends video bytes and requests a project playback link with bearer auth', async () => {
-  const calls = [];
-  const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch: async (url, init) => {
-    calls.push({ url, ...init });
-    return response(url.endsWith('/google') ? { access_token: 'demo-token' } : { url: '/v1/media/project?expires=123&signature=abc', expiresAt: 123000 });
-  }});
+test('uploads send raw video bytes with their content type', async () => {
+  const { calls, fetch } = recorder();
+  const api = S.createHttpApi({ baseUrl: 'http://api.test/', fetch });
   await api.signIn({ email: 'maya@example.com', password: 'secret' });
   const file = new Blob(['video-bytes'], { type: 'video/mp4' });
   await api.uploadMedia('upload-1', file);
-  await api.getProjectPlayback('project-1');
   assert.equal(calls[1].url, 'http://api.test/v1/uploads/upload-1/media');
-  assert.equal(calls[1].headers.Authorization, 'Bearer demo-token');
   assert.equal(calls[1].headers['Content-Type'], 'video/mp4');
   assert.equal(calls[1].body, file);
-  assert.equal(calls[2].url, 'http://api.test/v1/projects/project-1/playback');
-  assert.equal(calls[2].method, 'POST');
-  assert.equal(calls[2].headers.Authorization, 'Bearer demo-token');
+});
+
+test('an expired session refreshes once, shared by concurrent requests, then retries', async () => {
+  let expired = true;
+  const { calls, fetch } = recorder({
+    '/v1/projects': () => (expired ? response({ error: { code: 'UNAUTHENTICATED' } }, 401) : response([])),
+    '/v1/auth/refresh': () => { expired = false; return response({ csrfToken: 'csrf-2', expiresIn: 900 }); },
+  });
+  const api = S.createHttpApi({ fetch });
+  const [a, b] = await Promise.all([api.listProjects(), api.listProjects()]);
+  assert.deepEqual([a, b], [[], []]);
+  assert.equal(calls.filter((c) => c.url.endsWith('/v1/auth/refresh')).length, 1);
+  await api.createUpload({});
+  assert.equal(calls.at(-1).headers['X-CSRF-Token'], 'csrf-2');
+});
+
+test('a refresh racing another tab retries the request instead of signing out', async () => {
+  let attempts = 0;
+  const { fetch } = recorder({
+    '/v1/me': () => (++attempts === 1 ? response({ error: { code: 'UNAUTHENTICATED' } }, 401) : response(session)),
+    '/v1/auth/refresh': response({ error: { code: 'REFRESH_IN_PROGRESS' } }, 409),
+  });
+  assert.equal((await S.createHttpApi({ fetch }).me()).user.email, session.user.email);
+});
+
+test('a failed refresh ends the session and reports UNAUTHENTICATED', async () => {
+  const { calls, fetch } = recorder({
+    '/v1/me': response({ error: { code: 'UNAUTHENTICATED' } }, 401),
+    '/v1/auth/refresh': response({ error: { code: 'UNAUTHENTICATED' } }, 401),
+  });
+  const api = S.createHttpApi({ fetch });
+  await assert.rejects(api.me(), { code: 'UNAUTHENTICATED' });
+  assert.equal(calls.filter((c) => c.url.endsWith('/v1/me')).length, 1);  // no retry loop
+});
+
+test('session endpoints never trigger an automatic refresh', async () => {
+  const { calls, fetch } = recorder({ '/v1/auth/google': response({ error: { code: 'UNAUTHENTICATED' } }, 401) });
+  await assert.rejects(S.createHttpApi({ fetch }).signIn({ email: 'x@example.com', password: 'bad' }), { code: 'UNAUTHENTICATED' });
+  assert.equal(calls.some((c) => c.url.endsWith('/v1/auth/refresh')), false);
 });
 
 for (const code of ['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED']) {
-  test(`HTTP ${code} clears the token`, async () => {
-    const storage = memoryStorage();
+  test(`HTTP ${code} forgets the CSRF token`, async () => {
     let fail = false;
-    let lastHeaders;
-    const api = S.createHttpApi({ storage, fetch: async (url, init) => {
-      lastHeaders = init.headers;
-      if (url.endsWith('/google')) return response({ access_token: 'token', expires_in: 3600 });
-      return fail ? response({ error: { code } }, code === 'UNAUTHENTICATED' ? 401 : 403) : response(session);
-    }});
+    const { calls, fetch } = recorder({
+      '/v1/me': () => (fail ? response({ error: { code } }, code === 'UNAUTHENTICATED' ? 401 : 403) : response(session)),
+      '/v1/auth/refresh': response({ error: { code: 'UNAUTHENTICATED' } }, 401),
+    });
+    const api = S.createHttpApi({ fetch });
     await api.signIn({ email: 'maya@example.com', password: 'secret' });
     fail = true;
     await assert.rejects(api.me(), { code });
-    assert.equal(storage.items.size, 0);
-    fail = false;
-    await api.me();
-    assert.equal(lastHeaders.Authorization, undefined);
+    await api.createUpload({});
+    assert.equal(calls.at(-1).headers['X-CSRF-Token'], undefined);
   });
 }
 
-test('network failure on logout still clears the token', async () => {
-  let lastHeaders;
-  const api = S.createHttpApi({ fetch: async (url, init) => {
-    lastHeaders = init.headers;
-    if (url.endsWith('/logout')) throw new Error('offline');
-    return response({ access_token: 'token' });
-  }});
+test('sign-out forgets the CSRF token even when the network fails', async () => {
+  const { calls, fetch } = recorder({ '/v1/auth/logout': () => { throw new Error('offline'); } });
+  const api = S.createHttpApi({ fetch });
   await api.signIn({ email: 'maya@example.com', password: 'secret' });
   await assert.rejects(api.signOut(), { code: 'NETWORK_ERROR' });
-  await api.me();
-  assert.equal(lastHeaders.Authorization, undefined);
+  await api.createUpload({});
+  assert.equal(calls.at(-1).headers['X-CSRF-Token'], undefined);
 });
 
-test('a delayed private response cannot restore data after logout', async () => {
-  let resolveMe;
-  const api = S.createHttpApi({ fetch: async (url) => {
-    if (url.endsWith('/google')) return response({ access_token: 'token' });
-    if (url.endsWith('/me')) return new Promise(resolve => { resolveMe = resolve; });
-    return response({ ok: true });
-  }});
-  await api.signIn({ email: 'maya@example.com', password: 'secret' });
+test('a delayed login or private response cannot apply after sign-out', async () => {
+  let resolveLogin, resolveMe;
+  const { fetch } = recorder({
+    '/v1/auth/google': () => new Promise((resolve) => { resolveLogin = resolve; }),
+    '/v1/me': () => new Promise((resolve) => { resolveMe = resolve; }),
+    '/v1/auth/logout': response({ ok: true }),
+  });
+  const api = S.createHttpApi({ fetch });
+  const login = api.signIn({ email: 'maya@example.com', password: 'secret' });
+  await api.signOut();
+  resolveLogin(response(signedIn));
+  await assert.rejects(login, { code: 'SESSION_CHANGED' });
   const pending = api.me();
   await api.signOut();
   resolveMe(response(session));
   await assert.rejects(pending, { code: 'SESSION_CHANGED' });
 });
 
-test('missing login token is an explicit server error', async () => {
-  const api = S.createHttpApi({ fetch: async () => response(session) });
-  await assert.rejects(api.signIn({ email: 'maya@example.com', password: 'secret' }), { code: 'SERVER_ERROR' });
+test('a sign-in response without a session is an explicit server error', async () => {
+  const { fetch } = recorder({ '/v1/auth/google': response(session) });
+  await assert.rejects(S.createHttpApi({ fetch }).signIn({ email: 'maya@example.com', password: 'secret' }), { code: 'SERVER_ERROR' });
+});
+
+test('Google sign-in starts at the API and the login page shows the options it offers', async (t) => {
+  assert.equal(S.googleSignInUrl('http://api.test/'), 'http://api.test/v1/auth/google/start');
+  const page = component({ ...S, createApi: () => ({ getAuthOptions: async () => ({ google: true, password: false }), me: async () => { throw new S.ApiError('UNAUTHENTICATED', null, 401); } }) });
+  t.after(() => page.componentWillUnmount());
+  await page.componentDidMount();
+  await new Promise((r) => setImmediate(r));
+  const v = page.renderVals();
+  assert.equal(v.googleEnabled, true);
+  assert.equal(v.passwordEnabled, false);
+  assert.equal(page.state.route, 'login');
+});
+
+test('an auth_error returned by Google sign-in is shown once and removed from the URL', async (t) => {
+  const replaced = [];
+  const globals = { URLSearchParams };
+  const page = component({ ...S, createApi: () => ({ getAuthOptions: async () => ({ google: true, password: true }), me: async () => { throw new S.ApiError('UNAUTHENTICATED', null, 401); } }) }, 'http://api.test', globals);
+  t.after(() => page.componentWillUnmount());
+  // The page reads window.location / history from its vm context: inject an auth_error.
+  const win = vm.runInContext('window', vmContextOf(page));
+  win.location = { search: '?auth_error=NOT_INVITED', pathname: '/', hash: '' };
+  win.history = { replaceState: (...args) => replaced.push(args[2]) };
+  await page.componentDidMount();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(page.state.loginError, S.ERROR_COPY.NOT_INVITED);
+  assert.deepEqual(replaced, ['/']);
 });
 
 function component(services, baseUrl = 'http://api.test', globals = {}) {
@@ -223,8 +201,12 @@ function component(services, baseUrl = 'http://api.test', globals = {}) {
     setState(update) { this.state = { ...this.state, ...(typeof update === 'function' ? update(this.state) : update) }; }
   }
   const context = vm.createContext({ DCLogic, URL, window: { ShortsServices: services, SHORTS_CONFIG: { apiBaseUrl: baseUrl } }, setTimeout, clearTimeout, setInterval, clearInterval, ...globals });
-  return vm.runInContext(script + '\nnew Component()', context);
+  const page = vm.runInContext(script + '\nnew Component()', context);
+  contexts.set(page, context);
+  return page;
 }
+const contexts = new WeakMap();
+const vmContextOf = (page) => contexts.get(page);
 
 test('startup validates the session and opens the dashboard without another login', async t => {
   const page = component({ ...S, createApi: () => ({ me: async () => session, listProjects: async () => [{ id: 'p1', status: 'draft' }] }) });
@@ -369,8 +351,22 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
   });
+  // Node's fetch has no cookie jar; this one stands in for the browser's (by name and path).
+  const jar = new Map();
+  const browserFetch = async (url, init = {}) => {
+    const { pathname } = new URL(url);
+    const cookies = [...jar].filter(([, c]) => pathname.startsWith(c.path)).map(([name, c]) => `${name}=${c.value}`);
+    const res = await fetch(url, { ...init, headers: { ...init.headers, ...(cookies.length ? { Cookie: cookies.join('; ') } : {}) } });
+    for (const line of res.headers.getSetCookie()) {
+      const [pair, ...attrs] = line.split(';').map((part) => part.trim());
+      const [name, value] = pair.split('=');
+      const path = (attrs.find((a) => a.toLowerCase().startsWith('path=')) || 'path=/').slice(5);
+      if (/max-age=0/i.test(line) || value === '' || value === '""') jar.delete(name); else jar.set(name, { value, path });
+    }
+    return res;
+  };
   const storage = memoryStorage();
-  const persistentServices = { ...S, createApi: config => S.createApi({ ...config, storage }) };
+  const persistentServices = { ...S, createApi: config => S.createApi({ ...config, fetch: browserFetch, storage }) };
   const page = component(persistentServices, baseUrl);
   t.after(() => page.componentWillUnmount());
   await page.componentDidMount();
@@ -415,7 +411,8 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   t.after(() => afterLogout.componentWillUnmount());
   await afterLogout.componentDidMount();
   assert.equal(afterLogout.state.route, 'login');
-  assert.equal(storage.items.size, 0);
+  assert.equal(storage.items.size, 0);  // nothing is ever kept in browser storage
+  assert.equal(jar.size, 0);  // sign-out cleared the session cookies
 });
 
 test('redesigned workflow preserves preview selection and the chosen render resolution', async t => {

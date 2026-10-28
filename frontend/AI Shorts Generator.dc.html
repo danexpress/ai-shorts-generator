@@ -34,6 +34,7 @@ const idem = () => 'idem_' + Math.random().toString(36).slice(2) + Date.now().to
 class Component extends DCLogic {
   state = {
     route: 'boot', bootError: null, me: null, loginEmail: '', loginPassword: '', loginBusy: false, loginError: null,
+    authOptions: { google: false, password: true },
     projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
     previewUrls: {}, pendingPreviewUrl: null, pendingFile: null,
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -63,13 +64,35 @@ class Component extends DCLogic {
       this.api = window.ShortsServices.createApi({
         mode: 'http',
         baseUrl: window.SHORTS_CONFIG.apiBaseUrl,
-        onCall: (call) => { if (!call.ok && call.method !== 'signIn' && this.state.route !== 'boot') this.handleAuth(call); },
+        onCall: (call) => { if (!call.ok && !['signIn', 'getAuthOptions', 'refreshSession'].includes(call.method) && this.state.route !== 'boot') this.handleAuth(call); },
       });
+      this.pendingAuthError = this.takeAuthError();
+      this.loadAuthOptions();
       return this.restoreSession();
     };
     return boot();
   }
   componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+
+  // Google sign-in returns to the app with ?auth_error=<code> on failure; never tokens.
+  takeAuthError() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('auth_error');
+      if (!code) return null;
+      params.delete('auth_error');
+      const query = params.toString();
+      window.history?.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+      return window.ShortsServices.ERROR_COPY[code] || 'Sign-in didn’t complete. Try again.';
+    } catch (_) { return null; }
+  }
+  async loadAuthOptions() {
+    try { const authOptions = await this.api.getAuthOptions(); if (!this.disposed) this.setState({ authOptions }); }
+    catch (_) { /* keep the defaults; the login form still works */ }
+  }
+  signInWithGoogle() {
+    window.location.assign(window.ShortsServices.googleSignInUrl(window.SHORTS_CONFIG.apiBaseUrl || ''));
+  }
 
   async restoreSession() {
     const request = this.sessionRequest = (this.sessionRequest || 0) + 1;
@@ -80,7 +103,7 @@ class Component extends DCLogic {
       await this.enter(me);
     } catch (error) {
       if (request !== this.sessionRequest || this.disposed || error.code === 'SESSION_CHANGED') return;
-      if (error.code === 'UNAUTHENTICATED') this.resetSession();
+      if (error.code === 'UNAUTHENTICATED') { this.resetSession(this.pendingAuthError); this.pendingAuthError = null; }
       else if (!this.handleAuth(error)) this.setState({ bootError: 'Check your connection and try again.' });
     }
   }
@@ -740,6 +763,8 @@ class Component extends DCLogic {
       onLoginEmail: (e) => this.setState({ loginEmail: e.target.value }),
       onLoginPassword: (e) => this.setState({ loginPassword: e.target.value }),
       signIn: (e) => this.signIn(e),
+      googleEnabled: s.authOptions.google, passwordEnabled: s.authOptions.password,
+      signInWithGoogle: () => this.signInWithGoogle(),
       // shell
       userName: me ? me.user.displayName : '', usageUsed: usage.usedMinutes, usageLimit: usage.limitMinutes, usageRemaining: remaining,
       isUnlimitedUsage: unlimitedUsage, isLimitedUsage: !unlimitedUsage,

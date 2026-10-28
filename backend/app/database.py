@@ -74,6 +74,8 @@ class Database:
             ],
             "transcripts": [("source_digest", "VARCHAR(64)")],
             "renders": [("framing", "VARCHAR(10)"), ("captions", "JSON")],
+            "users": [("google_sub", "VARCHAR(255)"), ("avatar_url", "TEXT")],
+            "auth_tokens": [("session_id", "VARCHAR(40)")],
         }
         for table, columns in additions.items():
             existing = {column["name"] for column in inspect(self.engine).get_columns(table)}
@@ -81,6 +83,14 @@ class Database:
                 for name, ddl in columns:
                     if name not in existing:
                         connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        with self.engine.begin() as connection:
+            # Indexes create_all only adds to new tables (IF NOT EXISTS: SQLite and PostgreSQL).
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_google_sub ON users (google_sub)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_auth_tokens_session_id ON auth_tokens (session_id)"
+            )
         try:
             with self.sessions.begin() as session:
                 session.add(DatabaseState(id=1, revision=0, demoSeeded=False))

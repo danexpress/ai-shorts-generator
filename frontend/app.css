@@ -1949,3 +1949,29 @@ details[open] > summary {
     border-top: 1px solid var(--line);
   }
 }
+
+/* ---------- Google sign-in ---------- */
+.google-button {
+  gap: 10px;
+  background: #fff;
+  color: #1f1f1f;
+  border: 1px solid #747775;
+  font-weight: 500;
+}
+.google-button:hover {
+  background: #f8f9fa;
+}
+.login-divider {
+  margin-block: var(--s3);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--line);
+}

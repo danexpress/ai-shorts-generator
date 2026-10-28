@@ -43,6 +43,15 @@
     ANALYSIS_FAILED: 'Finding clips failed. Retry — your transcript is kept.',
     CAPTIONS_EDITED: 'Changing filler words rebuilds the captions and replaces your edits.',
     CAPTIONS_UNAVAILABLE: 'Caption editing needs the connected backend.',
+    GOOGLE_UNAVAILABLE: 'Google sign-in isn’t set up on this server yet.',
+    GOOGLE_CANCELLED: 'Google sign-in was canceled.',
+    GOOGLE_SIGNIN_FAILED: 'Google sign-in didn’t complete. Try again.',
+    INVALID_ID_TOKEN: 'We couldn’t verify your Google sign-in. Try again.',
+    EMAIL_NOT_VERIFIED: 'Verify your Google account’s email address, then try again.',
+    LOGIN_STATE_INVALID: 'That sign-in link expired. Start again from this page.',
+    ACCOUNT_CONFLICT: 'This email is already linked to a different Google account.',
+    PASSWORD_LOGIN_DISABLED: 'Sign in with Google.',
+    CSRF_FAILED: 'For your security, refresh the page and try again.',
     NO_HIGHLIGHTS: 'We couldn’t find a 20–40 second moment that works as a standalone Short in this video. Try a longer video with more speech.',
     NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
     IMPORT_UNAVAILABLE: 'URL import isn’t available right now. Upload the video file instead.',
@@ -92,6 +101,8 @@
     ['listSocialAccounts', 'GET', '/v1/social-accounts'],
     ['connectSocialAccount', 'GET', '/v1/social-accounts/{id}/connect'],
     ['disconnectSocialAccount', 'DELETE', '/v1/social-accounts/{id}'],
+    ['getAuthOptions', 'GET', '/v1/auth/options'],
+    ['refreshSession', 'POST', '/v1/auth/refresh'],
     ['signIn', 'POST', '/v1/auth/google'],
     ['signOut', 'POST', '/v1/auth/logout'],
     ['me', 'GET', '/v1/me'],
@@ -259,95 +270,91 @@
 
   /* ---------- HTTP implementation ---------- */
 
-  function createHttpApi({ baseUrl = '', fetch: f, headers = {}, storage } = {}) {
+  // Calls that manage the session themselves never trigger an automatic refresh.
+  const SESSION_CALLS = new Set(['signIn', 'signOut', 'refreshSession', 'getAuthOptions']);
+
+  function googleSignInUrl(baseUrl = '') {
+    return baseUrl.replace(/\/+$/, '') + '/v1/auth/google/start';
+  }
+
+  // Sessions live in httpOnly cookies the page cannot read; nothing is stored in the
+  // browser by this client. The session's CSRF token is kept in memory only and sent
+  // as X-CSRF-Token on unsafe requests. A 401 triggers one shared refresh + retry.
+  function createHttpApi({ baseUrl = '', fetch: f, headers = {} } = {}) {
     const doFetch = f || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
     const origin = baseUrl.replace(/\/+$/, '');
-    // Keep only the expiring bearer token in this browser tab, scoped to the API.
-    // Storage can be unavailable (private browsing/policy); memory-only login still works.
-    if (storage === undefined) {
-      try { storage = typeof window !== 'undefined' ? window.sessionStorage : null; }
-      catch (_) { storage = null; }
-    }
-    const sessionKey = 'shorts-session:' + (origin || 'same-origin');
-    let accessToken = null;
-    let expiresAt = null;
+    let csrfToken = null;
     let sessionGeneration = 0;
-    const clearSession = () => {
-      accessToken = null;
-      expiresAt = null;
-      try { storage?.removeItem(sessionKey); } catch (_) {}
-    };
-    try {
-      const saved = storage?.getItem(sessionKey);
-      if (saved) {
-        const session = JSON.parse(saved);
-        if (typeof session.accessToken === 'string' && session.accessToken && Number.isFinite(session.expiresAt) && session.expiresAt > Date.now()) {
-          accessToken = session.accessToken;
-          expiresAt = session.expiresAt;
-        } else clearSession();
+    let refreshing = null;
+    const endSession = () => { sessionGeneration++; csrfToken = null; };
+    const remember = (data) => { if (data && typeof data.csrfToken === 'string' && data.csrfToken) csrfToken = data.csrfToken; };
+
+    const send = async (verb, url, body, name, opts) => {
+      const h = { Accept: 'application/json', ...headers };
+      const sendBody = body !== undefined && verb !== 'GET';
+      if (name === 'uploadMedia') h['Content-Type'] = body.type || 'application/octet-stream';
+      else if (sendBody) h['Content-Type'] = 'application/json';
+      if (opts.idempotencyKey) h['Idempotency-Key'] = opts.idempotencyKey;
+      if (verb !== 'GET' && csrfToken) h['X-CSRF-Token'] = csrfToken;
+      let res;
+      try {
+        const requestBody = !sendBody ? undefined : name === 'uploadMedia' ? body : JSON.stringify(body);
+        res = await doFetch(url, { method: verb, headers: h, credentials: 'include', body: requestBody });
+      } catch (e) {
+        throw new ApiError('NETWORK_ERROR', null, 0);
       }
-    } catch (_) { clearSession(); }
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+      return { res, data };
+    };
+
+    // One refresh at a time, shared by every request that hit an expired session.
+    const refresh = () => {
+      if (!refreshing) {
+        refreshing = (async () => {
+          try {
+            const { res, data } = await send('POST', origin + '/v1/auth/refresh', undefined, 'refreshSession', {});
+            if (res.ok) remember(data);
+            return res.ok || (data && data.error && data.error.code === 'REFRESH_IN_PROGRESS');
+          } catch (e) { return false; }
+          finally { refreshing = null; }
+        })();
+      }
+      return refreshing;
+    };
+
     const api = {};
     for (const [name, verb, path] of ENDPOINTS) {
       api[name] = async (...args) => {
         const url = origin + path.replace(/\{\w+\}/g, () => encodeURIComponent(args.shift()));
         const body = args[0];
         const opts = args[1] || {};
-        if (expiresAt !== null && expiresAt <= Date.now()) { sessionGeneration++; clearSession(); }
-        if (name === 'signIn' || name === 'signOut') sessionGeneration++;
+        if (name === 'signIn' || name === 'signOut') endSession();
         const requestGeneration = sessionGeneration;
-        if (name === 'signIn') clearSession();
-        const h = { Accept: 'application/json', ...headers };
-        if (accessToken) h.Authorization = 'Bearer ' + accessToken;
-        if (name === 'signOut') clearSession();
-        const sendBody = body !== undefined && verb !== 'GET';
-        if (name === 'uploadMedia') h['Content-Type'] = body.type || 'application/octet-stream';
-        else if (sendBody) h['Content-Type'] = 'application/json';
-        if (opts.idempotencyKey) h['Idempotency-Key'] = opts.idempotencyKey;
-        try {
-          let res;
-          try {
-            const requestBody = !sendBody ? undefined : name === 'uploadMedia' ? body : JSON.stringify(body);
-            res = await doFetch(url, { method: verb, headers: h, credentials: 'include', body: requestBody });
-          } catch (e) {
-            throw new ApiError('NETWORK_ERROR', null, 0);
-          }
-          const text = await res.text();
-          if (requestGeneration !== sessionGeneration) {
-            throw new ApiError('SESSION_CHANGED', 'Your session changed. Please try again.', 409);
-          }
-          let data = null;
-          try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
-          if (!res.ok) {
-            const err = (data && data.error) || {};
-            const fallback = res.status === 401 ? 'UNAUTHENTICATED' : res.status === 404 ? 'NOT_FOUND' : res.status >= 500 ? 'SERVER_ERROR' : 'INVALID_INPUT';
-            const code = err.code || fallback;
-            if (['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED'].includes(code)) { sessionGeneration++; clearSession(); }
-            throw new ApiError(code, err.message, res.status);
-          }
-          if (name === 'signIn') {
-            if (!data || typeof data.access_token !== 'string' || !data.access_token) {
-              throw new ApiError('SERVER_ERROR', 'The server did not return a sign-in token.', 502);
-            }
-            accessToken = data.access_token;
-            if (Number.isFinite(data.expires_in) && data.expires_in > 0) {
-              expiresAt = Date.now() + data.expires_in * 1000;
-              try { storage?.setItem(sessionKey, JSON.stringify({ accessToken, expiresAt })); } catch (_) {}
-            }
-          }
-          return data;
-        } finally {
-          // A disconnected server must not leave the browser signed in locally.
-          if (name === 'signOut' && requestGeneration === sessionGeneration) clearSession();
+        let { res, data } = await send(verb, url, body, name, opts);
+        if (res.status === 401 && !SESSION_CALLS.has(name) && requestGeneration === sessionGeneration && await refresh()) {
+          ({ res, data } = await send(verb, url, body, name, opts));
         }
+        if (requestGeneration !== sessionGeneration) {
+          throw new ApiError('SESSION_CHANGED', 'Your session changed. Please try again.', 409);
+        }
+        if (!res.ok) {
+          const err = (data && data.error) || {};
+          const fallback = res.status === 401 ? 'UNAUTHENTICATED' : res.status === 404 ? 'NOT_FOUND' : res.status >= 500 ? 'SERVER_ERROR' : 'INVALID_INPUT';
+          const code = err.code || fallback;
+          if (['UNAUTHENTICATED', 'ACCOUNT_DISABLED', 'NOT_INVITED'].includes(code)) endSession();
+          throw new ApiError(code, err.message, res.status);
+        }
+        if (name === 'signIn' && !(data && data.csrfToken)) {
+          throw new ApiError('SERVER_ERROR', 'The server did not start a session.', 502);
+        }
+        if (name === 'signIn' || name === 'me' || name === 'refreshSession') remember(data);
+        return data;
       };
     }
     return api;
   }
-
-  const CAPTION_PRESETS = [
-    { id: 'clean-bold', label: 'Clean Bold', description: 'White ExtraBold words with a thick outline; the spoken word turns yellow.', style: { font_name: 'Montserrat ExtraBold', font_size: 124, text_color: '#FFFFFF', active_color: '#FFE500', outline_color: '#000000', outline: 7, shadow: 0, shadow_color: '#000000', shadow_opacity: 0, inactive_opacity: 1, active_scale: 100, uppercase: false, letter_spacing: 0, line_height: 1.1, position: 0.67 } },
-  ];
 
   /* ---------- Sample content for the mock (business interview) ---------- */
 
@@ -691,6 +698,8 @@
       }),
       signOut: () => op(() => { session = null; return { ok: true }; }),
       me: () => op(() => meView(requireUser())),
+      getAuthOptions: () => op(() => ({ google: false, password: true })),
+      refreshSession: () => op(() => { requireUser(); return { csrfToken: 'mock-csrf', expiresIn: 900 }; }),
 
       createUpload: (body) => op(() => {
         const u = requireUser();
@@ -911,5 +920,5 @@
     return api;
   }
 
-  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance, captionLines, retimeCaptionText, nudgeCaption };
+  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, googleSignInUrl, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance, captionLines, retimeCaptionText, nudgeCaption };
 });

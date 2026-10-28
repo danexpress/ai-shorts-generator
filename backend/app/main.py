@@ -14,6 +14,7 @@ from .config import Settings
 from .database import Database
 from .db_models import DatabaseState, UserRecord
 from .errors import ApiError
+from .google_auth import GoogleOIDC
 from .models import ErrorResponse
 from .routers import (
     analysis,
@@ -46,6 +47,7 @@ def create_app(
     social_settings: SocialSettings | None = None,
     social_adapters: dict | None = None,
     social_copy_model=None,
+    google=None,
 ) -> FastAPI:
     settings = settings or Settings()
     owns_database = database is None
@@ -64,6 +66,7 @@ def create_app(
             yield
         finally:
             app.state.social_http.close()
+            app.state.google.close()
             if owns_database:
                 database.dispose()
 
@@ -103,6 +106,7 @@ def create_app(
     )
     app.add_middleware(RedactOAuthQueries)
     app.state.database = database
+    app.state.google = google or GoogleOIDC(settings, clock=clock)
     app.state.settings = settings
     app.state.clock = clock
     app.state.fail_next = set()  # Internal simulator test hook, not persisted user data.
@@ -111,7 +115,7 @@ def create_app(
         allow_origins=list(settings.cors_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-CSRF-Token"],
         expose_headers=["Accept-Ranges", "Content-Range", "Content-Length"],
     )
 

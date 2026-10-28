@@ -70,6 +70,44 @@ class Settings:
         )
     )
     job_lease_seconds: int = 300
+    # Sign-in. Google OIDC is enabled when both client values are set.
+    google_client_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLIENT_ID", ""))
+    google_client_secret: str = field(
+        default_factory=lambda: os.environ.get("GOOGLE_CLIENT_SECRET", ""), repr=False
+    )
+    # Email/password sign-in (demo accounts, local development). Disable in production.
+    allow_password_login: bool = field(
+        default_factory=lambda: (
+            os.environ.get("ALLOW_PASSWORD_LOGIN", "true").lower() in {"1", "true", "yes"}
+        )
+    )
+    # Private beta: Google accounts may create a user only when their verified email
+    # is invited (an existing invited user, or listed here), unless signup is open.
+    beta_invite_emails: frozenset = field(
+        default_factory=lambda: frozenset(
+            e.strip().lower()
+            for e in os.environ.get("BETA_INVITE_EMAILS", "").split(",")
+            if e.strip()
+        )
+    )
+    open_signup: bool = field(
+        default_factory=lambda: (
+            os.environ.get("OPEN_SIGNUP", "false").lower() in {"1", "true", "yes"}
+        )
+    )
+    backend_public_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "BACKEND_PUBLIC_URL", "http://127.0.0.1:8000"
+        ).rstrip("/")
+    )
+    frontend_public_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "FRONTEND_PUBLIC_URL", "http://127.0.0.1:3000"
+        ).rstrip("/")
+    )
+    session_access_seconds: int = 900
+    session_refresh_seconds: int = 30 * 86_400
+    login_state_seconds: int = 600
     token_ttl_seconds: int = 3600
     upload_ttl_seconds: int = 900
     transcription_seconds: float = 4

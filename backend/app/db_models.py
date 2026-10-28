@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -38,7 +39,10 @@ class DatabaseState(Base):
 
 class UserRecord(Base):
     __tablename__ = "users"
-    __table_args__ = (CheckConstraint("limit_minutes >= 0", name="ck_user_allowance"),)
+    __table_args__ = (
+        CheckConstraint("limit_minutes >= 0", name="ck_user_allowance"),
+        Index("ux_users_google_sub", "google_sub", unique=True),
+    )
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(254), unique=True)
     displayName: Mapped[str] = mapped_column("display_name", String(255))
@@ -48,12 +52,50 @@ class UserRecord(Base):
     limitMinutes: Mapped[int] = mapped_column("limit_minutes", Integer)
     unlimitedUsage: Mapped[bool] = mapped_column("unlimited_usage", Boolean, default=False)
     passwordHash: Mapped[str] = mapped_column("password_hash", String(255))
+    # Google account subject: the stable identity; email is profile data only.
+    googleSub: Mapped[str | None] = mapped_column("google_sub", String(255))
+    avatarUrl: Mapped[str | None] = mapped_column("avatar_url", Text)
 
 
 class TokenRecord(Base):
     __tablename__ = "auth_tokens"
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     userId: Mapped[str] = mapped_column("user_id", ForeignKey("users.id"), index=True)
+    expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger, index=True)
+    # Set for short-lived cookie access tokens; null for API bearer tokens.
+    sessionId: Mapped[str | None] = mapped_column("session_id", String(40), index=True)
+
+
+class AuthSessionRecord(Base):
+    """One signed-in browser. Access and refresh tokens rotate within it."""
+
+    __tablename__ = "auth_sessions"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    userId: Mapped[str] = mapped_column("user_id", ForeignKey("users.id"), index=True)
+    csrfToken: Mapped[str] = mapped_column("csrf_token", String(64))
+    method: Mapped[str] = mapped_column(String(20))
+    createdAt: Mapped[int] = mapped_column("created_at", BigInteger)
+    expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger, index=True)
+    revokedAt: Mapped[int | None] = mapped_column("revoked_at", BigInteger)
+
+
+class RefreshTokenRecord(Base):
+    __tablename__ = "auth_refresh_tokens"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sessionId: Mapped[str] = mapped_column("session_id", ForeignKey("auth_sessions.id"), index=True)
+    expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger)
+    # A token is usable once; presenting a used token revokes the whole session.
+    usedAt: Mapped[int | None] = mapped_column("used_at", BigInteger)
+
+
+class LoginStateRecord(Base):
+    """One pending Google sign-in, bound to the browser that started it."""
+
+    __tablename__ = "auth_login_states"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    browserDigest: Mapped[str] = mapped_column("browser_digest", String(64))
+    nonce: Mapped[str] = mapped_column(String(64))
+    verifier: Mapped[str] = mapped_column(String(128))
     expiresAt: Mapped[int] = mapped_column("expires_at", BigInteger, index=True)
 
 

@@ -255,10 +255,16 @@ class Store:
             query = query.where(JobRecord.state == "running")
         return self.db.scalar(query.order_by(JobRecord.attempt.desc()).limit(1))
 
-    def session(self, user: UserRecord) -> dict:
+    def session(self, user: UserRecord, auth_session=None) -> dict:
         job = self.active_job(user.id)
         return {
-            "user": {k: getattr(user, k) for k in ("id", "email", "displayName", "role")},
+            "user": {
+                **{k: getattr(user, k) for k in ("id", "email", "displayName", "role")},
+                "avatarUrl": user.avatarUrl,
+                "googleLinked": user.googleSub is not None,
+            },
+            # Browsers echo this in X-CSRF-Token on unsafe cookie-authenticated requests.
+            "csrfToken": auth_session.csrfToken if auth_session else None,
             "features": {"youtubeImport": self.settings.youtube_import},
             "usage": self.usage(user),
             "activeJob": {

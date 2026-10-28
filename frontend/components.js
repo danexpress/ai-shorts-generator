@@ -2238,6 +2238,18 @@
       ),
     );
   }
+  function GoogleMark() {
+    // Google's multicolor "G", per its sign-in branding guidelines.
+    const path = (d, fill) => h("path", { d, fill });
+    return h(
+      "svg",
+      { viewBox: "0 0 48 48", width: 18, height: 18, "aria-hidden": "true" },
+      path("M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z", "#EA4335"),
+      path("M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.4-4.1 6.9-10.2 6.9-17.5z", "#4285F4"),
+      path("M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z", "#FBBC05"),
+      path("M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z", "#34A853"),
+    );
+  }
   function Login({ v }) {
     return h(
       "div",
@@ -2283,6 +2295,24 @@
               title: "Unable to sign in",
               message: v.loginError,
             }),
+          v.googleEnabled &&
+            h(
+              Button,
+              { className: "wide google-button", onClick: v.signInWithGoogle },
+              h(GoogleMark),
+              "Continue with Google",
+            ),
+          v.googleEnabled &&
+            v.passwordEnabled &&
+            h("div", { className: "login-divider", role: "separator" }, h("span", null, "or")),
+          !v.googleEnabled &&
+            !v.passwordEnabled &&
+            h(
+              "p",
+              { className: "notice" },
+              "Sign-in isn’t configured on this server yet. Contact your workspace owner.",
+            ),
+          v.passwordEnabled &&
           h(
             Field,
             { id: "email", label: "Email address" },
@@ -2297,6 +2327,7 @@
               placeholder: "you@example.com",
             }),
           ),
+          v.passwordEnabled &&
           h(
             Field,
             { id: "password", label: "Password" },
@@ -2310,6 +2341,7 @@
               onChange: v.onLoginPassword,
             }),
           ),
+          v.passwordEnabled &&
           h(
             Button,
             {
@@ -2323,7 +2355,9 @@
           h(
             "p",
             { className: "login-caption" },
-            "Invite-only access. Use the credentials provided by your workspace owner.",
+            v.googleEnabled
+              ? "Invite-only access. Use the Google account your workspace owner invited."
+              : "Invite-only access. Use the credentials provided by your workspace owner.",
           ),
         ),
       ),

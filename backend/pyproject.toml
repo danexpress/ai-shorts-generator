@@ -17,6 +17,7 @@ dependencies = [
   "av>=12,<16",
   "fonttools>=4.50,<5",
   "anthropic>=1,<2",
+  "joserfc>=1.7,<2",
 ]
 
 [project.optional-dependencies]
