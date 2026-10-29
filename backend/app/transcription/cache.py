@@ -54,10 +54,10 @@ def load_or_transcribe(
     elapsed = time.monotonic() - started
     duration = result.get("duration") or 0
     logger.info(
-        "Transcribed %.1fs of audio in %.1fs (%.2fx realtime, %s, %d segments)",
+        "Transcribed %.1fs of audio in %.1fs (%.1fx realtime, %s, %d segments)",
         duration,
         elapsed,
-        elapsed / duration if duration else 0,
+        duration / elapsed if elapsed else 0,
         transcriber.key,
         len(result["segments"]),
     )

@@ -396,3 +396,26 @@ def test_backend_selection(monkeypatch, settings):
     )
     with pytest.raises(ValueError):
         build_transcriber(dataclasses.replace(settings, whisper_backend="gpu-please"))
+
+
+def test_unexpected_stage_errors_fail_the_job_but_never_stop_the_worker(
+    local_client, database, local_settings, clock
+):
+    headers = login(local_client)
+    project_id = start(local_client, headers)
+
+    class Exploding:
+        key = "boom"
+
+        def transcribe(self, source, on_progress=None):
+            raise KeyError("unexpected")  # not a TranscriptionError
+
+    w = worker(database, local_settings, clock, Exploding())
+    assert w.run_once() is True  # handled, not raised
+    current = status(local_client, headers, project_id)
+    assert (current["status"], current["failureCode"], current["canRetry"]) == (
+        "failed",
+        "TRANSCRIPTION_FAILED",
+        True,
+    )
+    assert w.run_once() is False  # the worker is still alive and the queue is empty

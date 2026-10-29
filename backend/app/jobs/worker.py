@@ -92,6 +92,11 @@ class ProcessingWorker:
                 self.analyze(job_id)
         except Abandoned:
             logger.info("Job %s was canceled or reassigned; result discarded", job_id)
+        except Exception:
+            # One bad job must never stop the worker: fail it (retryable) and move on.
+            logger.exception("Unexpected error in %s stage of job %s", stage, job_id)
+            code = "TRANSCRIPTION_FAILED" if stage == "transcribing" else "ANALYSIS_FAILED"
+            self.fail(job_id, stage, code)
         return True
 
     def owned_job(self, db, job_id, stage) -> JobRecord:

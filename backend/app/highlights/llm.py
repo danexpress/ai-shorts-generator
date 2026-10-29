@@ -133,6 +133,13 @@ class ClaudeHighlightModel:
             raise HighlightUnavailable(f"Claude API error {exc.status_code}.") from exc
         except anthropic.APIConnectionError as exc:
             raise HighlightUnavailable("Could not reach the Claude API.") from exc
+        except TypeError as exc:
+            # The SDK raises TypeError when no API key, token or `ant` profile exists.
+            if "authentication" not in str(exc):
+                raise
+            raise HighlightUnavailable(
+                "No Claude API credentials: set ANTHROPIC_API_KEY (or HIGHLIGHT_MODEL=demo)."
+            ) from exc
         elapsed = time.monotonic() - started
         served_by = getattr(response, "model", None) or self.model
         self.usage.add(served_by, response.usage, elapsed)

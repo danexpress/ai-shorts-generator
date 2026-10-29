@@ -456,3 +456,17 @@ def test_worker_marks_llm_outages_retryable(hl_client, database, hl_settings, cl
     assert (
         hl_client.get(f"/v1/projects/{project}/status", headers=headers).json()["status"] == "ready"
     )
+
+
+def test_missing_credentials_are_reported_as_unavailable_not_a_crash():
+    error = TypeError(
+        '"Could not resolve authentication method. Expected one of api_key, auth_token"'
+    )
+    model = ClaudeHighlightModel("claude-opus-5-5", client=sdk_client(FakeMessages(error=error)))
+    with pytest.raises(HighlightUnavailable, match="ANTHROPIC_API_KEY"):
+        model.complete("s", "c", "v", {})
+    unrelated = ClaudeHighlightModel(
+        "claude-opus-5-5", client=sdk_client(FakeMessages(error=TypeError("bug")))
+    )
+    with pytest.raises(TypeError):
+        unrelated.complete("s", "c", "v", {})
