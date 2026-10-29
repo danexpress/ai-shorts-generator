@@ -33,6 +33,10 @@ class Settings:
         default_factory=lambda: os.environ.get("PROCESSING_MODE", "local").strip().lower()
     )
     whisper_model: str = field(default_factory=lambda: os.environ.get("WHISPER_MODEL", "small"))
+    # auto: MLX on the Apple-silicon GPU when available, else faster-whisper (CUDA/CPU).
+    whisper_backend: str = field(
+        default_factory=lambda: os.environ.get("WHISPER_BACKEND", "auto").strip().lower()
+    )
     whisper_device: str = field(default_factory=lambda: os.environ.get("WHISPER_DEVICE", "auto"))
     whisper_compute_type: str = field(
         default_factory=lambda: os.environ.get("WHISPER_COMPUTE_TYPE", "auto")

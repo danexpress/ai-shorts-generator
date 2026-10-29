@@ -7,6 +7,7 @@ canceled or deleted meanwhile.
 """
 
 import logging
+import os
 import signal
 import time
 
@@ -269,6 +270,14 @@ def main():
     database = Database(settings.database_url)
     database.initialize()
     worker = ProcessingWorker(database, settings)
+    logger.info("Transcription: %s", worker.transcriber.key)
+    if settings.highlight_model != "demo" and not (
+        os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    ):
+        logger.warning(
+            "No ANTHROPIC_API_KEY set: highlight detection will fail unless an `ant auth login` "
+            "profile exists. Set the key, or HIGHLIGHT_MODEL=demo to use the demo analyzer."
+        )
     running = True
 
     def stop(*args):

@@ -4,7 +4,7 @@ FastAPI implements the operations in [`../openapi.yaml`](../openapi.yaml). SQLAl
 
 ## Run
 
-From the repository root, run `make run` and, in a second terminal, `make worker` (it transcribes and analyzes uploaded videos; without it projects stay in *Transcribing*). Set `PROCESSING_MODE=demo` on both to use the simulated pipeline instead. To override the connection URL:
+From the repository root, run `make run`. It starts the API and the video processing worker together (the worker transcribes and analyzes uploads; without it projects would stay in *Transcribing*), and Ctrl-C stops both. Run `make worker` in a second terminal only for social publishing. Set `PROCESSING_MODE=demo` to use the simulated pipeline instead. To override the connection URL:
 
 ```sh
 DATABASE_URL='sqlite+pysqlite:////absolute/path/to/ai-shorts.db' make run
@@ -77,14 +77,26 @@ It enforces ownership, invitations, one active job per creator, source limits, u
 
 ## Transcription
 
-`make worker` runs `app.jobs.worker`, which claims processing jobs with a renewable lease, transcribes the source with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (word timestamps, VAD filtering) outside any database transaction, and then runs analysis. Progress shown in the app is the real fraction of audio decoded. Canceling or deleting a project while it transcribes makes the worker discard its result.
+`make run` starts `app.jobs.worker` alongside the API. The worker claims processing jobs with a renewable lease, transcribes the source with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (word timestamps, VAD filtering) outside any database transaction, and then runs analysis. Progress shown in the app is the real fraction of audio decoded. Canceling or deleting a project while it transcribes makes the worker discard its result.
 
-- **Model and device:** `WHISPER_MODEL` (default `small`; `tiny`/`base` are faster, `medium`/`large-v3` more accurate). `WHISPER_DEVICE=auto` uses an NVIDIA GPU (CUDA, float16) when present, otherwise CPU int8. CTranslate2 has no Apple-silicon GPU backend, so Macs run on CPU; `small` runs at roughly 0.4× realtime on an M4 Pro. The model downloads from Hugging Face on first use.
+- **Backend:** `WHISPER_BACKEND=auto` (default) uses [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) on the Apple-silicon GPU when available, and faster-whisper otherwise. MLX is installed automatically on Apple-silicon Macs. Set `WHISPER_BACKEND=faster-whisper` to force the CPU/CUDA path.
+- **Speed:** measured on an M4 Pro with a 5-minute slice of a real 69-minute podcast, with word timestamps:
+
+  | Backend / model | 5 min of audio | 69-min video (projected) |
+  | --- | --- | --- |
+  | MLX `small` (GPU, default on Macs) | 8 s | ~2 min |
+  | MLX `large-v3-turbo` (GPU) | 14 s | ~3.5 min |
+  | faster-whisper `small` (CPU int8) | 42 s | ~10 min |
+
+  Through the app (decoding included), MLX `small` ran 10 minutes of that video in 17 s. Forcing faster-whisper onto all CPU cores was 5× slower than its default, so thread counts are left alone.
+- **Model:** `WHISPER_MODEL` (default `small`; `tiny`/`base` are faster; `turbo` (`large-v3-turbo`), `medium` and `large-v3` are more accurate). On MLX the names map to `mlx-community` conversions, or give a Hugging Face repo directly. Models download on first use (`small` about 0.5 GB, `turbo` about 1.6 GB).
+- **Device (faster-whisper):** `WHISPER_DEVICE=auto` uses an NVIDIA GPU (CUDA, float16) when present, otherwise CPU int8.
+- **Long videos on MLX:** audio is decoded once and transcribed in about 5-minute chunks cut at the quietest moment near each boundary, so no word is split. The language is detected on the first chunk and kept, so set `WHISPER_LANGUAGE=en` if videos open with music. Progress updates after every chunk.
 - **Tighter word timing:** `uv sync --extra align` then `WHISPER_ALIGN=whisperx` re-aligns words with WhisperX (wav2vec2 forced alignment). Words it cannot align keep their Whisper timing. The extra pulls in PyTorch and is not installed by default.
 - **Transcribed once:** results are cached at `MEDIA_DIR/transcripts/<sha256 of source>.<model>.json` in the format `segments → words → {text, start, end, probability}`. Retries and identical uploads reuse the file. The cache file is deleted with the last project transcript that refers to it, so it follows the analysis retention policy.
 - **Stored transcript:** the project transcript keeps the existing API shape (`segments[].words[] = {w, s, e}`); transcript edits, captions and analysis all read from it.
 - **No speech:** symbol-only output (`♪`), Whisper's no-speech heuristic, and repetitive decoding loops are filtered. If nothing remains (silence, music only), the project fails with `NO_SPEECH`, which explains the problem and cannot be retried.
-- **Logs:** model load time, audio duration, transcription time and realtime factor, and cache hits are logged by the worker.
+- **Logs:** the worker logs the transcription backend at startup, plus audio duration, transcription time and realtime factor, and cache hits. It warns at startup when no `ANTHROPIC_API_KEY` is set, because highlight detection (the next stage) needs one, or `HIGHLIGHT_MODEL=demo`.
 
 ## Karaoke captions
 
@@ -120,7 +132,7 @@ Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (defau
 
 ### Changing the model or prompt
 
-- **Model**: set `HIGHLIGHT_MODEL` (default `claude-opus-5-5`; e.g. `claude-sonnet-5-5` is cheaper, `claude-haiku-5-5` cheapest) and restart `make worker`. The model name is saved with every analysis run. Add a new model's prices to `PRICES` in `app/highlights/llm.py` for cost logging (unknown models log tokens only), and to `FALLBACK_MODELS` only if it accepts server-side fallbacks. Tune `HIGHLIGHT_EFFORT` alongside the model: lower effort is faster and cheaper.
+- **Model**: set `HIGHLIGHT_MODEL` (default `claude-opus-5-5`; e.g. `claude-sonnet-5-5` is cheaper, `claude-haiku-5-5` cheapest) and restart `make run`. The model name is saved with every analysis run. Add a new model's prices to `PRICES` in `app/highlights/llm.py` for cost logging (unknown models log tokens only), and to `FALLBACK_MODELS` only if it accepts server-side fallbacks. Tune `HIGHLIGHT_EFFORT` alongside the model: lower effort is faster and cheaper.
 - **Prompt**: edit `SYSTEM`, `GUIDANCE`, `RETRY` or `RERANK_SYSTEM` in `app/highlights/prompt.py`, keeping the `{min_seconds}`, `{max_seconds}` and `{count}` placeholders and the output schema in sync with `parse_candidates`. Bump `PROMPT_VERSION`; it is stored with each run (shown as *prompt* in the suggestions footer) so results can be traced to the prompt that produced them.
 - **Clip length / count**: `highlight_min_seconds` / `highlight_max_seconds` in `app/config.py` and `HIGHLIGHT_CANDIDATES`; the prompt and validation both read them.
 - Run `make test` afterwards: `tests/test_highlights.py` covers validation, snapping, retries, windowing, signals and the request shape with a mocked LLM.
@@ -143,6 +155,6 @@ Run `make test` and `make lint` from the repository root. Worker and transcripti
 
 ## Social publishing
 
-Connect accounts under **Settings → Social Accounts**, then open a rendered Short and choose **Review & publish**. YouTube, TikTok and X use separate official API adapters, encrypted user OAuth tokens and independent persistent publishing jobs. Start `make worker` in a third terminal using the same environment, database and media directory as `make run`. Platforms default disabled until configured.
+Connect accounts under **Settings → Social Accounts**, then open a rendered Short and choose **Review & publish**. YouTube, TikTok and X use separate official API adapters, encrypted user OAuth tokens and independent persistent publishing jobs. Start `make worker` in a second terminal using the same environment, database and media directory as `make run`. Platforms default disabled until configured.
 
 See [social publishing setup, callbacks, scopes, approvals and security](../docs/social-publishing.md) and the [environment template](.env.social.example). The OpenAPI contract includes the new endpoints, including the asynchronous 202 publish response. No live platform credentials or copy-model key are included.

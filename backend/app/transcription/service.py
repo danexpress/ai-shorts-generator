@@ -7,8 +7,12 @@ highlight detection:
         {"start", "end", "text", "words": [{"text", "start", "end", "probability"}]}]}
 """
 
+import itertools
 import logging
+import platform
 import re
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -142,6 +146,161 @@ class FasterWhisperTranscriber:
         return result
 
 
+SAMPLE_RATE = 16_000
+# Whisper model names -> MLX conversions on Hugging Face (mlx-community).
+MLX_MODELS = {
+    "tiny": "mlx-community/whisper-tiny-mlx",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+def mlx_repo(model: str) -> str:
+    if "/" in model:
+        return model  # an explicit Hugging Face repo
+    if model.endswith(".en"):
+        return f"mlx-community/whisper-{model}-mlx"
+    return MLX_MODELS.get(model, f"mlx-community/whisper-{model}-mlx")
+
+
+def decode_audio(source: Path, ffmpeg: str):
+    """The first audio track as 16 kHz mono float32 samples."""
+    import numpy as np
+
+    result = subprocess.run(
+        [ffmpeg, "-nostdin", "-v", "error", "-i", str(source), "-map", "0:a:0"]
+        + ["-f", "s16le", "-ac", "1", "-ar", str(SAMPLE_RATE), "-"],
+        capture_output=True,
+        timeout=3600,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise TranscriptionError("The audio track could not be decoded.")
+    return np.frombuffer(result.stdout, np.int16).astype(np.float32) / 32768.0
+
+
+def split_points(samples, chunk_seconds: float = 300, search_seconds: float = 10):
+    """(start, end) sample ranges of about chunk_seconds, cut at the quietest 100 ms
+    within search_seconds of each boundary so a cut never lands inside a word."""
+    total = len(samples)
+    step, search, frame = (
+        int(chunk_seconds * SAMPLE_RATE),
+        int(search_seconds * SAMPLE_RATE),
+        SAMPLE_RATE // 10,
+    )
+    bounds, target = [0], int(chunk_seconds * SAMPLE_RATE)
+    # Leave a final chunk of at least 30 s rather than a fragment.
+    while target < total - 30 * SAMPLE_RATE:
+        low, high = max(bounds[-1] + frame, target - search), min(total, target + search)
+        window = samples[low:high]
+        frames = len(window) // frame
+        energy = (window[: frames * frame].reshape(frames, frame) ** 2).mean(axis=1)
+        cut = low + int(energy.argmin()) * frame + frame // 2
+        bounds.append(cut)
+        target = cut + step
+    bounds.append(total)
+    return [(a, b) for a, b in itertools.pairwise(bounds) if b > a]
+
+
+class MLXWhisperTranscriber:
+    """Whisper on the Apple-silicon GPU (MLX). Roughly 35x realtime with `small` on an
+    M4 Pro, versus about 0.5x for faster-whisper on its CPU."""
+
+    def __init__(
+        self, model_size="small", language="", ffmpeg=None, aligner=None, chunk_seconds=300
+    ):
+        self.repo = mlx_repo(model_size)
+        self.language = language or None
+        self.ffmpeg, self.aligner, self.chunk_seconds = ffmpeg, aligner, chunk_seconds
+        self.key = f"mlx-whisper-{model_size}-{language or 'auto'}" + (
+            f"-{aligner.key}" if aligner else ""
+        )
+
+    def transcribe(self, source: Path, on_progress: Progress | None = None) -> dict:
+        try:
+            import mlx_whisper
+
+            from ..renderer import ffmpeg_path
+
+            samples = decode_audio(source, self.ffmpeg or ffmpeg_path())
+        except TranscriptionError:
+            raise
+        except Exception as exc:  # missing package/FFmpeg, unreadable file
+            raise TranscriptionError(str(exc)) from exc
+        duration = len(samples) / SAMPLE_RATE
+        language, kept = self.language, []
+        for start, end in split_points(samples, self.chunk_seconds):
+            offset = start / SAMPLE_RATE
+            try:
+                out = mlx_whisper.transcribe(
+                    samples[start:end],
+                    path_or_hf_repo=self.repo,
+                    language=language,
+                    word_timestamps=True,
+                    condition_on_previous_text=False,
+                    # Skips text Whisper invents over long silences.
+                    hallucination_silence_threshold=2.0,
+                    verbose=None,
+                )
+            except Exception as exc:  # model download or runtime failures
+                raise TranscriptionError(str(exc)) from exc
+            # Detect the language once, then keep it so chunks stay consistent.
+            language = language or out.get("language")
+            for segment in out.get("segments", []):
+                if not keep_segment(
+                    segment["text"],
+                    segment.get("no_speech_prob", 0.0),
+                    segment.get("avg_logprob", 0.0),
+                    segment.get("compression_ratio", 0.0),
+                ):
+                    continue
+                words = [
+                    {
+                        "text": word["word"].strip(),
+                        "start": round(float(word["start"]) + offset, 3),
+                        "end": round(float(word["end"]) + offset, 3),
+                        "probability": round(float(word.get("probability", 0.0)), 3),
+                    }
+                    for word in segment.get("words", [])
+                    if word["word"].strip()
+                ]
+                if words:
+                    kept.append(
+                        {
+                            "start": words[0]["start"],
+                            "end": words[-1]["end"],
+                            "text": segment["text"].strip(),
+                            "words": words,
+                        }
+                    )
+            # Outside the try: the worker's heartbeat may abandon a canceled job here.
+            if on_progress and duration:
+                on_progress(min(1.0, end / SAMPLE_RATE / duration))
+        result = {
+            "language": language or "en",
+            "duration": round(duration, 3),
+            "model": self.key,
+            "segments": kept,
+        }
+        if self.aligner and kept:
+            result = self.aligner.align(source, result)
+        return result
+
+
+def mlx_available() -> bool:
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        return False
+    try:
+        import mlx_whisper  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def build_transcriber(settings) -> Transcriber:
     aligner = None
     if settings.whisper_align == "whisperx":
@@ -150,6 +309,18 @@ def build_transcriber(settings) -> Transcriber:
         aligner = WhisperXAligner()
     elif settings.whisper_align:
         raise ValueError(f"Unknown WHISPER_ALIGN value: {settings.whisper_align}")
+    backend = settings.whisper_backend
+    if backend not in {"auto", "mlx", "faster-whisper"}:
+        raise ValueError(f"Unknown WHISPER_BACKEND value: {backend}")
+    if backend == "mlx" or (backend == "auto" and mlx_available()):
+        from ..renderer import ffmpeg_path
+
+        return MLXWhisperTranscriber(
+            settings.whisper_model,
+            settings.whisper_language,
+            ffmpeg_path(settings.ffmpeg_binary),
+            aligner,
+        )
     return FasterWhisperTranscriber(
         settings.whisper_model,
         settings.whisper_device,

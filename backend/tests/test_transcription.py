@@ -276,3 +276,123 @@ def test_source_digest_is_content_based(tmp_path):
     a.write_bytes(b"same")
     b.write_bytes(b"same")
     assert source_digest(a) == source_digest(b)
+
+
+# ---------- MLX (Apple-silicon GPU) backend, with a fake mlx_whisper ----------
+
+import sys
+
+import numpy as np
+
+from app.transcription import service as transcription_service
+from app.transcription.service import (
+    SAMPLE_RATE,
+    MLXWhisperTranscriber,
+    build_transcriber,
+    mlx_repo,
+    split_points,
+)
+
+
+def test_chunks_cut_at_the_quietest_moment_near_each_boundary():
+    samples = np.full(SAMPLE_RATE * 700, 0.5, np.float32)
+    quiet = SAMPLE_RATE * 304  # silence 4 s after the 300 s target
+    samples[quiet : quiet + SAMPLE_RATE // 5] = 0.0
+    chunks = split_points(samples, chunk_seconds=300, search_seconds=10)
+    assert chunks[0][0] == 0 and chunks[-1][1] == len(samples)
+    assert abs(chunks[0][1] - quiet) < SAMPLE_RATE // 5
+    assert all(a < b for a, b in chunks)
+    assert [b for _, b in chunks[:-1]] == [a for a, _ in chunks[1:]]  # contiguous
+    # A short remainder is merged rather than left as a fragment.
+    assert len(split_points(np.zeros(SAMPLE_RATE * 320, np.float32), 300)) == 1
+    assert split_points(np.zeros(0, np.float32)) == []
+
+
+def test_mlx_model_names_map_to_hugging_face_repos():
+    assert mlx_repo("small") == "mlx-community/whisper-small-mlx"
+    assert mlx_repo("turbo") == "mlx-community/whisper-large-v3-turbo"
+    assert mlx_repo("small.en") == "mlx-community/whisper-small.en-mlx"
+    assert mlx_repo("me/custom") == "me/custom"
+
+
+class FakeMLX:
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio, **options):
+        self.calls.append({"seconds": len(audio) / SAMPLE_RATE, **options})
+        word = lambda text, s, e: {"word": " " + text, "start": s, "end": e, "probability": 0.9}
+        return {
+            "language": "en",
+            "segments": [
+                {
+                    "text": " Hello there.",
+                    "no_speech_prob": 0.01,
+                    "avg_logprob": -0.2,
+                    "compression_ratio": 1.1,
+                    "words": [word("Hello", 1.0, 1.4), word("there.", 1.4, 1.9)],
+                },
+                {
+                    "text": " ♪",
+                    "no_speech_prob": 0.2,
+                    "avg_logprob": -0.4,
+                    "compression_ratio": 1.0,
+                    "words": [word("♪", 5.0, 9.0)],
+                },
+            ],
+        }
+
+
+def test_mlx_transcriber_offsets_chunks_pins_language_and_reports_progress(monkeypatch, tmp_path):
+    fake = FakeMLX()
+    monkeypatch.setitem(sys.modules, "mlx_whisper", fake)
+    monkeypatch.setattr(
+        transcription_service,
+        "decode_audio",
+        lambda source, ffmpeg: np.ones(SAMPLE_RATE * 650, np.float32),
+    )
+    progress = []
+    result = MLXWhisperTranscriber("small", ffmpeg="ffmpeg").transcribe(
+        tmp_path / "v.webm", progress.append
+    )
+    assert len(fake.calls) >= 2 and sum(c["seconds"] for c in fake.calls) == pytest.approx(650)
+    assert fake.calls[0]["language"] is None and {c["language"] for c in fake.calls[1:]} == {"en"}
+    assert all(
+        c["word_timestamps"] and c["path_or_hf_repo"].endswith("whisper-small-mlx")
+        for c in fake.calls
+    )
+    # One kept segment per chunk ("♪" dropped), shifted by the chunk's start time.
+    assert [s["text"] for s in result["segments"]] == ["Hello there."] * len(fake.calls)
+    assert result["segments"][1]["start"] == pytest.approx(fake.calls[0]["seconds"] + 1.0, abs=0.01)
+    assert len(progress) == len(fake.calls) and progress[-1] == 1.0
+    assert result["duration"] == 650 and result["model"] == "mlx-whisper-small-auto"
+
+
+def test_mlx_errors_become_transcription_errors(monkeypatch, tmp_path):
+    class Broken:
+        def transcribe(self, audio, **options):
+            raise RuntimeError("download failed")
+
+    monkeypatch.setitem(sys.modules, "mlx_whisper", Broken())
+    monkeypatch.setattr(
+        transcription_service, "decode_audio", lambda s, f: np.ones(SAMPLE_RATE * 40, np.float32)
+    )
+    with pytest.raises(TranscriptionError):
+        MLXWhisperTranscriber("small", ffmpeg="ffmpeg").transcribe(tmp_path / "v.mp4")
+
+
+def test_backend_selection(monkeypatch, settings):
+    monkeypatch.setattr(transcription_service, "mlx_available", lambda: True)
+    assert isinstance(
+        build_transcriber(dataclasses.replace(settings, whisper_backend="auto")),
+        MLXWhisperTranscriber,
+    )
+    forced = build_transcriber(dataclasses.replace(settings, whisper_backend="faster-whisper"))
+    assert isinstance(forced, FasterWhisperTranscriber)
+    monkeypatch.setattr(transcription_service, "mlx_available", lambda: False)
+    assert isinstance(
+        build_transcriber(dataclasses.replace(settings, whisper_backend="auto")),
+        FasterWhisperTranscriber,
+    )
+    with pytest.raises(ValueError):
+        build_transcriber(dataclasses.replace(settings, whisper_backend="gpu-please"))
