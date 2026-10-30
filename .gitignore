@@ -1,2 +1,5 @@
 .DS_Store
 frontend/.thumbnail
+backend/media
+# Local Claude Code worktrees (separate checkouts on their own branches)
+.claude/worktrees/
