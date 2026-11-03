@@ -51,6 +51,8 @@ class SocialSettings:
     youtube_verified: bool = field(default_factory=lambda: flag("YOUTUBE_PUBLISHING_VERIFIED"))
     # YouTube Data API defaults: videos.insert has its own bucket of 100 calls/day;
     # other calls share 10,000 units/day. Raise them after Google grants more quota.
+    # USD charged by the X API per published post (media upload + post), for cost logs.
+    x_cost_per_post: float = field(default_factory=lambda: float(os.getenv("X_COST_PER_POST", "0")))
     youtube_daily_uploads: int = field(
         default_factory=lambda: int(os.getenv("YOUTUBE_DAILY_UPLOADS", "100"))
     )

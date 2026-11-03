@@ -12,6 +12,11 @@ class XPublisher(SocialPublisher):
     token_url = "https://api.x.com/2/oauth2/token"
     hosts = ("api.x.com",)
 
+    @property
+    def cost_per_post_usd(self):
+        # X API pricing depends on the developer plan; set X_COST_PER_POST to match yours.
+        return self.settings.x_cost_per_post
+
     def token_request(self, **fields):
         data = self.http.json(
             "POST",

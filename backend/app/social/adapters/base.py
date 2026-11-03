@@ -85,6 +85,11 @@ class SocialPublisher(ABC):
     # Refresh access tokens this long before they expire (seconds).
     refresh_ahead_seconds = 120
 
+    @property
+    def cost_per_post_usd(self) -> float:
+        """API charge for one published post, for cost logging (0 for quota-based APIs)."""
+        return 0.0
+
     def __init__(self, settings, http, platform: str | None = None):
         # `platform` lets one adapter class serve several platforms.
         self.settings, self.http = settings, http

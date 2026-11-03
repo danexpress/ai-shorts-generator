@@ -153,6 +153,10 @@ class PublishWorker:
                     row.units = max(row.units, limits[bucket])
         return reset
 
+    def job_seconds(self, job):
+        """Seconds since the job became due (its scheduled time, else when requested)."""
+        return max(0.0, (self.now() - (job.scheduled_at or job.created_at)) / 1000)
+
     def hold_for_quota(self, job_id, reset_ms):
         """Requeue for just after the reset without using up a retry attempt."""
         with self.database.transaction() as db:
@@ -186,6 +190,7 @@ class PublishWorker:
         if not job_id:
             return False
         cp, adapter, action = {}, None, None
+        started = time.monotonic()
         try:
             with self.database.transaction() as db:
                 job = db.get(PublishJob, job_id)
@@ -300,10 +305,29 @@ class PublishWorker:
                 job.error_code, job.error_message_safe = None, step.notice
                 job.next_attempt_at, job.updated_at = self.now() + step.delay * 1000, self.now()
                 job.lease_owner, job.lease_until = None, None
+                logger.info(
+                    "publish job=%s platform=%s step=%s status=%s attempt=%d took=%.1fs",
+                    job.id,
+                    job.platform,
+                    action,
+                    step.status,
+                    job.attempt_count,
+                    time.monotonic() - started,
+                )
                 if step.status == "published":
                     job.checkpoint_encrypted = None
                     job.published_at = self.now()
                     job.retryable = False
+                    logger.info(
+                        "publish job=%s platform=%s result=published attempts=%d total=%.1fs "
+                        "api_cost_usd=%.4f",
+                        job.id,
+                        job.platform,
+                        job.attempt_count,
+                        self.job_seconds(job),
+                        # Logging must never turn a published post into a failure.
+                        getattr(adapter, "cost_per_post_usd", 0.0) or 0.0,
+                    )
                     event(
                         db,
                         job.user_id,
@@ -354,6 +378,15 @@ class PublishWorker:
                 account = db.get(SocialAccount, job.social_account_id)
                 if account:
                     account.status = "reconnect_required"
+            logger.warning(
+                "publish job=%s platform=%s result=%s error=%s attempt=%d total=%.1fs",
+                job.id,
+                job.platform,
+                "retrying" if automatic else "failed",
+                error.code,
+                job.attempt_count,
+                self.job_seconds(job),
+            )
             if not automatic:
                 event(db, job.user_id, "platform_publish_failed", self.now(), job.platform, job.id)
 
