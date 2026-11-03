@@ -182,3 +182,32 @@ def test_burned_in_captions_highlight_the_spoken_word(tmp_path):
     # "HELLO WORLD" fits on one line: the highlight moves from left to right.
     assert max(first) < min(second) and max(first) < width / 2 < max(second)
     assert video[11][(int(height * 0.67) * width + width // 2) * 3 + 2] > 150  # blue again
+
+
+def fake_ffmpeg(tmp_path, name, filters):
+    """A stand-in executable that prints an FFmpeg-style filter list."""
+    path = tmp_path / name
+    listing = "\n".join(f" ... {f:<16} V->V       description" for f in filters)
+    path.write_text(f"#!/bin/sh\ncat <<'EOF'\nFilters:\n{listing}\nEOF\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_captions_never_use_an_ffmpeg_without_libass(tmp_path, monkeypatch):
+    from app import renderer
+
+    renderer.has_filter.cache_clear()
+    with_libass = fake_ffmpeg(tmp_path, "bundled", ["scale", "ass", "subtitles"])
+    without = fake_ffmpeg(tmp_path, "homebrew", ["scale", "crop"])  # e.g. Homebrew's build
+    monkeypatch.setattr(renderer, "_bundled_ffmpeg", lambda: with_libass)
+    monkeypatch.setattr(renderer.shutil, "which", lambda name: without)
+    assert renderer.ffmpeg_path(None) == with_libass  # bundled build is preferred
+    assert renderer.ffmpeg_path(None, need_subtitles=True) == with_libass
+    monkeypatch.setattr(renderer, "_bundled_ffmpeg", lambda: None)
+    assert renderer.ffmpeg_path(None) == without  # still fine without captions
+    with pytest.raises(renderer.RendererUnavailable, match="subtitle support"):
+        renderer.ffmpeg_path(None, need_subtitles=True)
+    with pytest.raises(renderer.RendererUnavailable, match="FFMPEG_BIN"):
+        renderer.ffmpeg_path(without, need_subtitles=True)
+    assert renderer.ffmpeg_path(with_libass, need_subtitles=True) == with_libass
+    renderer.has_filter.cache_clear()

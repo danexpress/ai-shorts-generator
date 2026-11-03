@@ -63,10 +63,12 @@ def render_project_clip(id: str, body: RenderRequest, store: StoreDep, user: Use
             fonts_dir=FONTS_DIR,
         )
         temporary.replace(destination)
-    except RendererUnavailable:
+    except RendererUnavailable as exc:
         temporary.unlink(missing_ok=True)
         raise ApiError(
-            "RENDERER_UNAVAILABLE", "Video rendering is not available on this server.", 503
+            "RENDERER_UNAVAILABLE",
+            str(exc) or "Video rendering is not available on this server.",
+            503,
         )
     except RenderFailed:
         temporary.unlink(missing_ok=True)

@@ -1,6 +1,8 @@
 """FFmpeg-backed rendering of a continuous source interval as a vertical MP4."""
 
+import functools
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,18 +20,48 @@ class RenderFailed(RuntimeError):
     pass
 
 
-def ffmpeg_path(configured: str | None = None) -> str:
-    if configured:
-        return configured
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
+def _bundled_ffmpeg() -> str | None:
     try:
         import imageio_ffmpeg
 
         return imageio_ffmpeg.get_ffmpeg_exe()
-    except (ImportError, RuntimeError) as exc:
-        raise RendererUnavailable from exc
+    except (ImportError, RuntimeError):
+        return None
+
+
+@functools.lru_cache(maxsize=8)
+def has_filter(executable: str, name: str) -> bool:
+    """Whether this FFmpeg build includes a filter (e.g. "ass" needs libass)."""
+    try:
+        result = subprocess.run(
+            [executable, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", result.stdout, re.MULTILINE) is not None
+
+
+def ffmpeg_path(configured: str | None = None, need_subtitles: bool = False) -> str:
+    """FFMPEG_BIN if set, else the bundled build (known to include libass), else PATH.
+
+    With need_subtitles, a candidate without the libass "ass" filter is skipped: some
+    package-manager builds (e.g. Homebrew's) omit it and could not burn in captions.
+    """
+    if configured:
+        if need_subtitles and not has_filter(configured, "ass"):
+            raise RendererUnavailable(
+                f"FFMPEG_BIN ({configured}) has no subtitle support; use a build with libass."
+            )
+        return configured
+    candidates = [c for c in (_bundled_ffmpeg(), shutil.which("ffmpeg")) if c]
+    for candidate in candidates:
+        if not need_subtitles or has_filter(candidate, "ass"):
+            return candidate
+    raise RendererUnavailable("No FFmpeg with subtitle support (libass) was found.")
 
 
 def render_short(
@@ -49,7 +81,7 @@ def render_short(
     canvas with a centred crop. `captions_ass` is burned in with libass using only
     the fonts in `fonts_dir`.
     """
-    executable = ffmpeg_path(configured_ffmpeg)
+    executable = ffmpeg_path(configured_ffmpeg, need_subtitles=bool(captions_ass))
     height = 1920 if resolution == 1080 else 1280
     width = 1080 if resolution == 1080 else 720
     if framing == "crop":
