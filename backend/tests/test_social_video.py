@@ -68,8 +68,8 @@ def test_video_rules_are_isolated_per_provider():
         clients={p: {"id": "id", "secret": "secret"} for p in ["youtube", "tiktok", "x"]},
     )
     video = {"size": 5 * 1024**3, "duration": 30, "width": 1080, "height": 1920, "fps": 30}
-    YouTubePublisher(settings, None).validate_video(video, {"visibility": "private"})
-    XPublisher(settings, None).validate_video(video, {})
+    YouTubePublisher(settings, None).validate(video, {"visibility": "private"})
+    XPublisher(settings, None).validate(video, {})
     creator = {
         "max_duration": 60,
         "privacy_options": ["SELF_ONLY"],
@@ -78,11 +78,11 @@ def test_video_rules_are_isolated_per_provider():
         "stitch_disabled": False,
     }
     with pytest.raises(ProviderError, match="MEDIA_REJECTED"):
-        TikTokPublisher(settings, None).validate_video(
+        TikTokPublisher(settings, None).validate(
             video, {"privacy": "SELF_ONLY", "consent": True}, creator
         )
     with pytest.raises(ProviderError, match="MEDIA_REJECTED"):
-        YouTubePublisher(settings, None).validate_video(
+        YouTubePublisher(settings, None).validate(
             {**video, "size": 1000, "duration": 190}, {"visibility": "private"}
         )
-    XPublisher(settings, None).validate_video({**video, "size": 1000, "duration": 190}, {})
+    XPublisher(settings, None).validate({**video, "size": 1000, "duration": 190}, {})

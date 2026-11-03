@@ -25,6 +25,12 @@ class FakePublisher(FakeAccountAdapter):
     def __init__(self, platform, calls):
         self.platform, self.calls, self.failures = platform, calls, []
         self.reject = False
+        # The same interface hooks the real adapters declare for these platforms.
+        self.needs_creator_info = platform == "tiktok"
+        self.supports_thumbnail = platform == "youtube"
+
+    def upload_complete(self, checkpoint):
+        return False
 
     def creator_info(self, token):
         return {
@@ -37,7 +43,7 @@ class FakePublisher(FakeAccountAdapter):
             "max_duration": 60,
         }
 
-    def validate_video(self, video, metadata, creator=None):
+    def validate(self, video, metadata, creator=None):
         if self.reject:
             raise ProviderError("MEDIA_REJECTED")
 
@@ -47,7 +53,7 @@ class FakePublisher(FakeAccountAdapter):
             raise self.failures.pop(0)
         return PublishStep("processing", {**cp, "uploaded": True}, delay=0)
 
-    def get_publish_status(self, token, cp):
+    def get_status(self, token, cp):
         return PublishStep(
             "published",
             cp,

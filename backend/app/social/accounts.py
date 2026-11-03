@@ -84,7 +84,7 @@ class AccountService:
     def adapter(self, platform):
         if (
             platform not in PLATFORMS
-            or not self.settings.available(platform)
+            or not self.settings.available(platform, self.adapters.get(platform))
             or platform not in self.adapters
         ):
             raise ApiError("SOCIAL_UNAVAILABLE", "This platform is not configured yet.", 503)
@@ -102,8 +102,9 @@ class AccountService:
             "platforms": [
                 {
                     "platform": p,
-                    "enabled": self.settings.available(p) and p in self.adapters,
-                    "notice": self.settings.notice(p),
+                    "enabled": self.settings.available(p, self.adapters.get(p))
+                    and p in self.adapters,
+                    "notice": self.settings.notice(p, self.adapters.get(p)),
                     "private_only": (p == "youtube" and not self.settings.youtube_verified)
                     or (p == "tiktok" and not self.settings.tiktok_audited),
                 }

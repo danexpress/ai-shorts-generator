@@ -54,7 +54,7 @@ class XPublisher(SocialPublisher):
         data = self.call(token, "GET", "users/me", params={"user.fields": "profile_image_url"})
         return Identity(data["id"], data["name"], data["username"], data.get("profile_image_url"))
 
-    def validate_video(self, video, metadata, creator=None):
+    def validate(self, video, metadata, creator=None):
         # Current v2 limits are account-dependent; conservative standard post caps.
         if (
             video["size"] > 8 * 1024**3
@@ -98,7 +98,7 @@ class XPublisher(SocialPublisher):
             data = self.call(token, "POST", f"media/upload/{cp['media_id']}/finalize")
             cp["finalized"] = True
             return self.processing(data, cp)
-        return self.get_publish_status(token, cp)
+        return self.get_status(token, cp)
 
     def processing(self, data, cp):
         processing = data.get("processing_info", {})
@@ -110,7 +110,10 @@ class XPublisher(SocialPublisher):
             "processing", cp, delay=max(1, int(processing.get("check_after_secs", 5)))
         )
 
-    def get_publish_status(self, token, checkpoint):
+    def upload_complete(self, checkpoint):
+        return bool(checkpoint.get("finalized"))
+
+    def get_status(self, token, checkpoint):
         data = self.call(token, "GET", "media/upload", params={"media_id": checkpoint["media_id"]})
         return self.processing(data, dict(checkpoint))
 

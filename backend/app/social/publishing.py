@@ -177,10 +177,10 @@ class PublishingService:
                     adapter.creator_info(
                         self.accounts.token(target.social_account_id, user_id, target.platform)
                     )
-                    if target.platform == "tiktok"
+                    if adapter.needs_creator_info
                     else None
                 )
-                adapter.validate_video(info, metadata, creator)
+                adapter.validate(info, metadata, creator)
             except ApiError:
                 errors[target.platform] = ProviderError("PERMISSION_REQUIRED")
             except ProviderError as error:

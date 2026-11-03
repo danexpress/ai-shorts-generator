@@ -7,6 +7,7 @@ from .base import Identity, ProviderError, PublishStep, SocialPublisher, Tokens
 
 class YouTubePublisher(SocialPublisher):
     platform = "youtube"
+    supports_thumbnail = True
     scopes = (
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
@@ -62,7 +63,7 @@ class YouTubePublisher(SocialPublisher):
             snippet.get("thumbnails", {}).get("default", {}).get("url"),
         )
 
-    def validate_video(self, video, metadata, creator=None):
+    def validate(self, video, metadata, creator=None):
         if (
             video["size"] > 256 * 1024**3
             or video["duration"] > 180
@@ -146,7 +147,10 @@ class YouTubePublisher(SocialPublisher):
             return PublishStep("processing", cp)
         return PublishStep("uploading", cp, delay=0)
 
-    def get_publish_status(self, token, checkpoint):
+    def upload_complete(self, checkpoint):
+        return bool(checkpoint.get("video_id"))
+
+    def get_status(self, token, checkpoint):
         if not checkpoint.get("video_id"):
             return PublishStep("uploading", checkpoint, delay=0)
         data = self.http.json(

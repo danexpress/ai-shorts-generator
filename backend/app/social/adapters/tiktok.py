@@ -7,6 +7,7 @@ from .base import Identity, ProviderError, PublishStep, SocialPublisher, Tokens
 
 class TikTokPublisher(SocialPublisher):
     platform = "tiktok"
+    needs_creator_info = True
     scopes = ("user.info.basic", "video.publish")
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
     hosts = ("tiktokapis.com",)
@@ -98,7 +99,7 @@ class TikTokPublisher(SocialPublisher):
             "max_duration": data["max_video_post_duration_sec"],
         }
 
-    def validate_video(self, video, metadata, creator=None):
+    def validate(self, video, metadata, creator=None):
         if (
             not creator
             or video["size"] > 4 * 1024**3
@@ -124,7 +125,7 @@ class TikTokPublisher(SocialPublisher):
         if not cp.get("publish_id"):
             # Re-query creator restrictions immediately before initializing the post.
             creator = self.creator_info(token)
-            self.validate_video(info, metadata, creator)
+            self.validate(info, metadata, creator)
             cp["username"] = creator.get("username")
             chunk_size = min(info["size"], 32 * 1024 * 1024)
             chunks = max(1, info["size"] // chunk_size)
@@ -209,7 +210,10 @@ class TikTokPublisher(SocialPublisher):
             )
         return PublishStep("processing", cp, delay=10)
 
-    def get_publish_status(self, token, checkpoint):
+    def upload_complete(self, checkpoint):
+        return bool(checkpoint.get("transfer_complete"))
+
+    def get_status(self, token, checkpoint):
         return self.status_step(
             self.call(
                 token, "post/publish/status/fetch/", {"publish_id": checkpoint["publish_id"]}

@@ -16,6 +16,45 @@ This module adds social accounts and publishing to stored renders without replac
 
 New tables: social_accounts, social_oauth_states, render_social_context, social_copy, publish_batches, publish_jobs, social_events, social_rate_limits, social_refresh_leases. History retains render IDs as identifiers so normal render expiration does not erase publication records. OAuth secrets and upload capabilities are encrypted; public response schemas use explicit allowlists.
 
+## Publisher interface and adapter registry
+
+Every platform is served by one adapter implementing `SocialPublisher` (`backend/app/social/adapters/base.py`). OAuth routes, token refresh, publishing jobs and the UI only call this interface:
+
+| Method | Purpose |
+| --- | --- |
+| `connect(state, verifier)` → URL | Start linking an account (OAuth with PKCE by default). |
+| `exchange(code, verifier)` → `Tokens` · `identity(access)` → `Identity` | Finish linking; who was linked. |
+| `refresh_token(refresh)` → `Tokens` | Called before tokens expire; a failure marks the account *reconnect required*. |
+| `validate(video, metadata, creator)` | Check format, duration, size, aspect ratio and caption limits up front; raise `ProviderError`. |
+| `publish(token, video, info, metadata, checkpoint)` → `PublishStep` | Resumable: each call advances one step (for example one upload chunk). The worker saves the returned checkpoint, encrypted, before calling again, so restarts and retries never upload or post twice. A finished step carries `post_id` and `post_url`. |
+| `get_status(token, checkpoint)` → `PublishStep` | Poll processing until `published` or a failure. |
+| `disconnect(access)` | Revoke access at the platform. |
+
+Optional hooks, with safe defaults, replace what used to be platform-name checks in shared code:
+- `needs_creator_info` and `creator_info()`: live per-account options, such as TikTok privacy, fetched at admission.
+- `upload_complete(checkpoint)`: later steps poll and no longer need the local file.
+- `create_post()`: for adapters whose step returns `publishing`. The worker records an uncertain marker first and never repeats it blindly.
+- `supports_thumbnail` and `set_thumbnail()`.
+- `requires_client_credentials`: whether `<PLATFORM>_CLIENT_ID/SECRET` are needed.
+
+Raise `ProviderError(code, retryable=True)` for transient failures (capped exponential backoff), or `uncertain=True` when a post may already exist.
+
+**Replacing an adapter, for example with a unified posting API.** Set `SOCIAL_ADAPTER_<PLATFORM>=package.module:ClassName` for each platform it should serve. One class may serve several platforms, because each instance is constructed with its platform name. The class must subclass `SocialPublisher`; a wrong path or class fails at startup with a clear message. Set `requires_client_credentials = False` if it uses its own API key instead of each platform's OAuth client. Nothing else changes: routes, jobs, retries, history and the UI work as before. `backend/tests/test_social_registry.py` runs a complete connect → publish → published flow through such an adapter.
+
+```python
+class UnifiedPublisher(SocialPublisher):
+    requires_client_credentials = False  # reads its own UNIFIED_API_KEY
+
+    def connect(self, state, verifier): ...   # the provider's account-linking URL for self.platform
+    def publish(self, token, video, info, metadata, checkpoint): ...
+    # ... exchange, identity, refresh_token, validate, get_status, disconnect
+```
+
+```sh
+SOCIAL_ADAPTER_TIKTOK=myapp.unified:UnifiedPublisher
+SOCIAL_ADAPTER_X=myapp.unified:UnifiedPublisher
+```
+
 ## Developer portal configuration
 
 All flags default off. Register callbacks exactly as `BACKEND_PUBLIC_URL/v1/social-accounts/{youtube|tiktok|x}/callback`. Use HTTPS for deployed backend and frontend URLs. TikTok web OAuth requires HTTPS, including testing; use an HTTPS tunnel/domain. The optional local HTTP setting is only for YouTube/X loopback development.

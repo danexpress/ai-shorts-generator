@@ -123,23 +123,18 @@ class PublishWorker:
                 if self.now() - job.created_at > 24 * 3600_000:
                     raise ProviderError("PUBLISH_UNCERTAIN")
                 # Processing/post creation can finish even after the local media expires.
+                adapter = self.accounts.adapter(job.platform)
                 path = None
-                if (
-                    job.status in {"queued", "uploading"}
-                    and not cp.get("video_id")
-                    and not cp.get("transfer_complete")
-                    and not (job.platform == "x" and cp.get("finalized"))
-                ):
+                if job.status in {"queued", "uploading"} and not adapter.upload_complete(cp):
                     _, path = owned_render(
                         db, job.user_id, job.render_id, self.now(), True, self.settings.media_dir
                     )
-            adapter = self.accounts.adapter(values["platform"])
             token = self.accounts.token(
                 values["social_account_id"], values["user_id"], values["platform"]
             )
             if cp.get("post_request_started"):
                 raise ProviderError("PUBLISH_UNCERTAIN")
-            if values["status"] == "publishing" and values["platform"] == "x":
+            if values["status"] == "publishing":
                 cp["post_request_started"] = True
                 self.save_checkpoint(job_id, cp)
                 try:
@@ -151,25 +146,20 @@ class PublishWorker:
                     else:
                         raise ProviderError("PUBLISH_UNCERTAIN") from None
                     raise
-            elif (
-                values["status"] == "processing"
-                or cp.get("video_id")
-                or cp.get("transfer_complete")
-                or (values["platform"] == "x" and cp.get("finalized"))
-            ):
-                step = adapter.get_publish_status(token, cp)
+            elif values["status"] == "processing" or adapter.upload_complete(cp):
+                step = adapter.get_status(token, cp)
             else:
                 if path is None:
                     raise ProviderError("ASSET_EXPIRED")
                 if not cp.get("video_info"):
                     cp["video_info"] = inspect_video(path, self.settings.ffmpeg_binary)
                     self.save_checkpoint(job_id, cp)
-                if values["platform"] != "tiktok":
-                    adapter.validate_video(cp["video_info"], values["post_metadata"])
+                if not adapter.needs_creator_info:  # those were validated at admission
+                    adapter.validate(cp["video_info"], values["post_metadata"])
                 step = adapter.publish(token, path, cp["video_info"], values["post_metadata"], cp)
             if (
                 step.status == "published"
-                and values["platform"] == "youtube"
+                and adapter.supports_thumbnail
                 and values["post_metadata"].get("use_thumbnail")
             ):
                 # Replacing the cover for a known video ID cannot create another post.
@@ -187,7 +177,7 @@ class PublishWorker:
                         token, step.post_id, cover_image(cover_path, self.settings.ffmpeg_binary)
                     )
                 except Exception:  # noqa: BLE001 - optional cover must not repeat a successful video upload
-                    step.notice = "Your video was published, but its custom cover could not be applied. You can change it in YouTube Studio."
+                    step.notice = "Your video was published, but its custom cover could not be applied. You can change it on the platform."
             with self.database.transaction() as db:
                 job = db.get(PublishJob, job_id)
                 if job.lease_owner != self.owner:

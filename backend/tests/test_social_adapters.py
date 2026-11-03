@@ -71,7 +71,7 @@ def test_youtube_resumes_then_waits_for_provider_confirmation(tmp_path):
         assert step.status == "uploading"
         step = adapter.publish("token", path, info, metadata, step.checkpoint)
         assert step.status == "processing"
-        step = adapter.get_publish_status("token", step.checkpoint)
+        step = adapter.get_status("token", step.checkpoint)
         assert step.status == "published" and step.post_url.endswith("video-1")
         assert sum(r.method == "POST" and r.url.path.endswith("/videos") for r in calls) == 1
     finally:
@@ -100,8 +100,8 @@ def test_youtube_private_restrictions_are_explicit():
     adapter = YouTubePublisher(settings(), None)
     video = {"size": 100, "duration": 30, "width": 1080, "height": 1920}
     with pytest.raises(ProviderError, match="PRIVATE_POSTING_ONLY"):
-        adapter.validate_video(video, {"visibility": "public"})
-    YouTubePublisher(replace(settings(), youtube_verified=True), None).validate_video(
+        adapter.validate(video, {"visibility": "public"})
+    YouTubePublisher(replace(settings(), youtube_verified=True), None).validate(
         video, {"visibility": "public"}
     )
 
@@ -151,11 +151,11 @@ def test_tiktok_creator_options_are_not_invented_and_private_mode_is_explicit():
         assert creator["privacy_options"] == ["SELF_ONLY"]
         video = {"size": 10, "duration": 30, "width": 1080, "height": 1920, "fps": 30}
         metadata = {"privacy": "SELF_ONLY", "consent": True, "allow_comment": False}
-        adapter.validate_video(video, metadata, creator)
+        adapter.validate(video, metadata, creator)
         with pytest.raises(ProviderError):
-            adapter.validate_video(video, {**metadata, "allow_comment": True}, creator)
+            adapter.validate(video, {**metadata, "allow_comment": True}, creator)
         with pytest.raises(ProviderError):
-            adapter.validate_video({**video, "duration": 90}, metadata, creator)
+            adapter.validate({**video, "duration": 90}, metadata, creator)
     finally:
         http.close()
 
@@ -177,8 +177,8 @@ def test_tiktok_waits_for_confirmation_and_handles_private_posts_without_public_
     )
     try:
         adapter = TikTokPublisher(settings(), http)
-        assert adapter.get_publish_status("token", {"publish_id": "p1"}).status == "processing"
-        step = adapter.get_publish_status("token", {"publish_id": "p1"})
+        assert adapter.get_status("token", {"publish_id": "p1"}).status == "processing"
+        step = adapter.get_status("token", {"publish_id": "p1"})
         assert step.status == "published" and step.post_url is None and step.post_id is None
     finally:
         http.close()
@@ -301,7 +301,7 @@ def test_x_chunked_upload_polls_before_creating_post(tmp_path):
         step = adapter.publish("token", path, info, {}, step.checkpoint)
         assert step.status == "processing"
         assert not any(r.url.path.endswith("/tweets") for r in requests)
-        step = adapter.get_publish_status("token", step.checkpoint)
+        step = adapter.get_status("token", step.checkpoint)
         assert step.status == "publishing"
         step = adapter.create_post("token", {"text": "A useful lesson"}, step.checkpoint)
         assert step.post_url == "https://x.com/i/status/456"

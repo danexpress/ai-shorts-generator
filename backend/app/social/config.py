@@ -38,6 +38,14 @@ class SocialSettings:
         },
         repr=False,
     )
+    # SOCIAL_ADAPTER_<PLATFORM>=package.module:Class replaces a built-in adapter.
+    adapter_overrides: dict = field(
+        default_factory=lambda: {
+            p: os.environ[f"SOCIAL_ADAPTER_{p.upper()}"].strip()
+            for p in PLATFORMS
+            if os.environ.get(f"SOCIAL_ADAPTER_{p.upper()}", "").strip()
+        }
+    )
     youtube_verified: bool = field(default_factory=lambda: flag("YOUTUBE_PUBLISHING_VERIFIED"))
     tiktok_audited: bool = field(default_factory=lambda: flag("TIKTOK_PUBLISHING_AUDITED"))
     copy_url: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_API_URL", ""))
@@ -69,19 +77,19 @@ class SocialSettings:
             )
         )
 
-    def available(self, platform):
+    def available(self, platform, adapter=None):
         client = self.clients.get(platform, {})
+        needs_client = getattr(adapter, "requires_client_credentials", True)
         return bool(
             self.enabled.get(platform)
-            and client.get("id")
-            and client.get("secret")
+            and (not needs_client or (client.get("id") and client.get("secret")))
             and self.encryption_keys
             and self.valid_url(self.public_url, platform)
             and self.valid_url(self.frontend_url, platform)
         )
 
-    def notice(self, platform):
-        if not self.available(platform):
+    def notice(self, platform, adapter=None):
+        if not self.available(platform, adapter):
             return "This connection is not enabled yet. Your workspace administrator needs to finish setup."
         if platform == "youtube" and not self.youtube_verified:
             return "This YouTube integration is configured for private uploads until its API project is verified."
