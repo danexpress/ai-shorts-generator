@@ -722,3 +722,50 @@ test('the HTTP client sends account deletion as DELETE with a JSON body and CSRF
   assert.equal(call.headers['X-CSRF-Token'], 'csrf-1');
   assert.deepEqual(JSON.parse(call.body), { confirmEmail: 'maya@example.com' });
 });
+
+test('schedule time helpers convert local wall-clock input to UTC and back', () => {
+  const iso = S.localInputToIso('2026-12-24T18:30');
+  assert.equal(new Date(iso).getHours(), 18);
+  assert.equal(new Date(iso).getMinutes(), 30);
+  assert.equal(S.msToLocalInput(new Date(iso).getTime()), '2026-12-24T18:30');
+  assert.equal(S.localInputToIso(''), null);
+  assert.equal(S.localInputToIso('not a date'), null);
+});
+
+test('scheduling sends scheduled_at, refuses past times locally, and cancels or reschedules', async (t) => {
+  const calls = [];
+  const scheduled = { id: 'b1', render_id: 'r1', created_at: 1, scheduled_at: Date.now() + 3600e3, jobs: [{ id: 'j1', platform: 'x', status: 'scheduled', scheduled_at: Date.now() + 3600e3 }] };
+  const page = component({ ...S, createApi: () => ({
+    publishRender: async (id, body, opts) => { calls.push(['publish', body, opts.idempotencyKey]); return scheduled; },
+    getPublishBatch: async () => scheduled,
+    reschedulePublishBatch: async (id, body) => { calls.push(['reschedule', id, body]); return { ...scheduled, scheduled_at: new Date(body.scheduled_at).getTime() }; },
+    cancelPublishBatch: async (id) => { calls.push(['cancel', id]); return { ...scheduled, jobs: [] }; },
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, route: 'publish', result: { id: 'r1' }, social: { accounts: [{ id: 'acc-x', platform: 'x' }], platforms: [] },
+    publishing: { ...page.state.publishing, selected: { x: true }, copy: { x: { text: 'Hello' } } } });
+  page.renderId = () => 'r1';
+  const v = () => page.renderVals().appProps.v;
+
+  v().setPublishWhen({ mode: 'schedule', at: S.msToLocalInput(Date.now() - 3600e3) });
+  await v().publishEverywhere();
+  assert.equal(calls.length, 0);  // past time rejected before any request
+  assert.equal(page.state.publishing.error, S.ERROR_COPY.SCHEDULE_IN_PAST);
+
+  const local = S.msToLocalInput(Date.now() + 2 * 3600e3);
+  v().setPublishWhen({ at: local });
+  await v().publishEverywhere();
+  const [kind, body] = calls[0];
+  assert.equal(kind, 'publish');
+  assert.equal(body.scheduled_at, S.localInputToIso(local));
+  assert.equal(JSON.stringify(body.targets.map((target) => target.platform)), '["x"]');
+  assert.equal(page.state.publishing.when.mode, 'now');  // next post defaults to "now" again
+
+  page.setState((s) => ({ publishing: { ...s.publishing, history: [scheduled] } }));
+  await v().reschedulePublish(scheduled, S.msToLocalInput(Date.now() + 5 * 3600e3));
+  assert.equal(calls[1][0], 'reschedule');
+  await v().cancelScheduled(scheduled);
+  assert.equal(JSON.stringify(calls[2]), JSON.stringify(['cancel', 'b1']));
+  assert.equal(page.state.publishing.history.length, 0);  // canceled batch leaves history
+});

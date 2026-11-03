@@ -26,6 +26,7 @@ from ..social.models import (
     SocialPublishBatchView,
     SocialPublishJobView,
     SocialPublishRequest,
+    SocialReschedule,
 )
 from ..social.security import SocialUser
 
@@ -203,6 +204,26 @@ def publish(
 )
 def batch(id: str, request: Request, user: SocialUser):
     return request.app.state.social_publishing.get(user, id)
+
+
+@router.patch(
+    "/publish-batches/{id}",
+    response_model=SocialPublishBatchView,
+    operation_id="reschedulePublishBatch",
+)
+def reschedule(id: str, body: SocialReschedule, request: Request, user: SocialUser):
+    """Move posts that have not started yet to a new time."""
+    return request.app.state.social_publishing.reschedule(user, id, body.scheduled_at)
+
+
+@router.post(
+    "/publish-batches/{id}/cancel",
+    response_model=SocialPublishBatchView,
+    operation_id="cancelPublishBatch",
+)
+def cancel_scheduled(id: str, request: Request, user: SocialUser):
+    """Cancel posts that have not started yet; started or finished posts are unaffected."""
+    return request.app.state.social_publishing.cancel(user, id)
 
 
 @router.post(

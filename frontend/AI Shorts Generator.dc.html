@@ -319,12 +319,18 @@ class Component extends DCLogic {
     const id=this.renderId(), version=this.publishVersion;
     const targets=Object.keys(state.selected).filter(p=>state.selected[p]&&!state.history.some(b=>b.jobs.some(j=>j.platform===p))).map(platform=>({platform,social_account_id:this.state.social.accounts.find(a=>a.platform===platform)?.id,[platform]:{...state.copy[platform],...(state.settings[platform]||{})}}));
     if(!targets.length) return;
+    const when=state.when||{mode:'now'};
+    let scheduled_at=null;
+    if(when.mode==='schedule'){
+      scheduled_at=window.ShortsServices.localInputToIso(when.at);
+      if(!scheduled_at||new Date(scheduled_at).getTime()<Date.now()+60e3) return this.setState(s=>({publishing:{...s.publishing,error:window.ShortsServices.ERROR_COPY.SCHEDULE_IN_PAST}}));
+    }
     this.publishKey=this.publishKey||idem();
     this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
     try {
-      const batch=await this.api.publishRender(id,{targets,approved:true},{idempotencyKey:this.publishKey});
+      const batch=await this.api.publishRender(id,{targets,approved:true,...(scheduled_at?{scheduled_at}:{})},{idempotencyKey:this.publishKey});
       if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return;
-      this.setState(s=>({publishing:{...s.publishing,selected:{},batch,history:[batch,...s.publishing.history.filter(b=>b.id!==batch.id)]}}));
+      this.setState(s=>({publishing:{...s.publishing,selected:{},when:{mode:'now',at:''},batch,history:[batch,...s.publishing.history.filter(b=>b.id!==batch.id)]}}));
       this.pollPublish(batch.id,id);
     } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
     finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
@@ -337,11 +343,34 @@ class Component extends DCLogic {
       const other=await Promise.all(this.state.publishing.history.filter(b=>b.id!==batchId&&b.jobs.some(j=>!['published','failed'].includes(j.status))).map(b=>this.api.getPublishBatch(b.id)));
       if(version!==this.publishVersion||!this.state.me||renderId!==this.renderId()||this.state.route!=='publish') return;
       this.setState(s=>({publishing:{...s.publishing,batch,history:[batch,...s.publishing.history.filter(b=>b.id!==batch.id).map(b=>other.find(updated=>updated.id===b.id)||b)]}}));
-      if(this.state.publishing.history.some(b=>b.jobs.some(j=>!['published','failed'].includes(j.status)))) this.publishTimer=setTimeout(()=>this.pollPublish(batchId,renderId),3000);
+      // Poll quickly while posts are in flight; scheduled-only batches just need an occasional check.
+      const pending=this.state.publishing.history.flatMap(b=>b.jobs).filter(j=>!['published','failed'].includes(j.status));
+      if(pending.length) this.publishTimer=setTimeout(()=>this.pollPublish(batchId,renderId),pending.every(j=>j.status==='scheduled')?60000:3000);
     } catch(e) {
       if(version!==this.publishVersion||!this.state.me) return;
       if(!this.handleAuth(e)) { this.setState(s=>({publishing:{...s.publishing,error:'We could not refresh publishing status. Your jobs are still saved. Try refreshing the status.'}})); }
     }
+  }
+  setPublishWhen(patch) {
+    this.publishKey=null;  // a different time is a different request
+    this.setState(s=>({publishing:{...s.publishing,error:null,when:{mode:'now',at:'',...s.publishing.when,...patch}}}));
+  }
+  async changeSchedule(batch, action, localValue) {
+    if(this.state.publishing.busy) return;
+    const version=this.publishVersion, id=this.renderId();
+    let scheduled_at=null;
+    if(action==='reschedule'){
+      scheduled_at=window.ShortsServices.localInputToIso(localValue);
+      if(!scheduled_at) return this.setState(s=>({publishing:{...s.publishing,error:window.ShortsServices.ERROR_COPY.SCHEDULE_IN_PAST}}));
+    }
+    this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
+    try {
+      const updated=action==='cancel'?await this.api.cancelPublishBatch(batch.id):await this.api.reschedulePublishBatch(batch.id,{scheduled_at});
+      if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return;
+      this.setState(s=>({publishing:{...s.publishing,history:s.publishing.history.map(b=>b.id===updated.id?updated:b).filter(b=>b.jobs.length)}}));
+      this.notify(action==='cancel'?'Scheduled posts canceled. Nothing was published.':'Posts rescheduled.');
+    } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
+    finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
   }
   async retrySocialJob(job) {
     if(this.state.publishing.busy) return;
@@ -853,7 +882,7 @@ class Component extends DCLogic {
     };
     const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts', publish: 'Publish Short' };
     Object.assign(values, {
-      publishing: s.publishing, confirmSocialTranscript: value => this.setState(t=>({publishing:{...t.publishing,transcriptConfirmed:value}})), openPublish: result => this.openPublish(result || s.result), editSocialCopy: (p,f,v) => this.editSocialCopy(p,f,v), saveSocialDraft: p => this.saveSocialDraft(p), editPublishSetting: (p,f,v) => this.editPublishSetting(p,f,v), selectPublishPlatform: (p,v) => this.selectPublishPlatform(p,v), generateSocialCopy: p => this.generateSocialCopy(p), publishEverywhere: () => this.publishEverywhere(), retrySocialJob: job => this.retrySocialJob(job), refreshPublish: () => this.loadPublish(s.result,true),
+      publishing: s.publishing, confirmSocialTranscript: value => this.setState(t=>({publishing:{...t.publishing,transcriptConfirmed:value}})), openPublish: result => this.openPublish(result || s.result), editSocialCopy: (p,f,v) => this.editSocialCopy(p,f,v), saveSocialDraft: p => this.saveSocialDraft(p), editPublishSetting: (p,f,v) => this.editPublishSetting(p,f,v), selectPublishPlatform: (p,v) => this.selectPublishPlatform(p,v), generateSocialCopy: p => this.generateSocialCopy(p), publishEverywhere: () => this.publishEverywhere(), retrySocialJob: job => this.retrySocialJob(job), setPublishWhen: patch => this.setPublishWhen(patch), cancelScheduled: batch => this.changeSchedule(batch,'cancel'), reschedulePublish: (batch,value) => this.changeSchedule(batch,'reschedule',value), msToLocalInput: ms => window.ShortsServices.msToLocalInput(ms), refreshPublish: () => this.loadPublish(s.result,true),
       social: s.social, loadSocialAccounts: () => this.loadSocialAccounts(), connectSocial: platform => this.connectSocial(platform), disconnectSocial: platform => this.disconnectSocial(platform),
       bootError: s.bootError, restoreSession: () => this.restoreSession(), showLogin: () => this.resetSession(),
       route: s.route, pageLabel: labels[s.route], theme: s.theme, email: me?.user.email || '',

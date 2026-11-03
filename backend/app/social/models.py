@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
 SocialPlatform = Literal["youtube", "tiktok", "x"]
 
@@ -183,6 +183,8 @@ class SocialPublishTarget(SocialInput):
 class SocialPublishRequest(SocialInput):
     targets: list[SocialPublishTarget] = Field(min_length=1, max_length=3)
     approved: bool
+    # Publish later instead of now: an ISO 8601 time with a timezone offset.
+    scheduled_at: AwareDatetime | None = None
 
     @model_validator(mode="after")
     def approval(self):
@@ -196,7 +198,10 @@ class SocialPublishJobView(BaseModel):
     platform: SocialPlatform
     social_account_id: str | None
     account_name: str | None = None
-    status: Literal["queued", "uploading", "processing", "publishing", "published", "failed"]
+    status: Literal[
+        "scheduled", "queued", "uploading", "processing", "publishing", "published", "failed"
+    ]
+    scheduled_at: int | None = None
     attempt_count: int
     platform_post_id: str | None
     platform_post_url: str | None
@@ -212,7 +217,12 @@ class SocialPublishBatchView(BaseModel):
     id: str
     render_id: str
     created_at: int
+    scheduled_at: int | None = None
     jobs: list[SocialPublishJobView]
+
+
+class SocialReschedule(SocialInput):
+    scheduled_at: AwareDatetime
 
 
 class SocialCreatorInfo(BaseModel):

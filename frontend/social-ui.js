@@ -107,10 +107,42 @@
       }),
     );
   }
+  function ScheduledControls({ v, batch, busy }) {
+    const [value, setValue] = root.React.useState(v.msToLocalInput(batch.scheduled_at));
+    return h(
+      "div",
+      { className: "notice column scheduled-batch" },
+      h("strong", null, "Scheduled for " + new Date(batch.scheduled_at).toLocaleString()),
+      h(
+        "div",
+        { className: "row wrap" },
+        h("input", {
+          type: "datetime-local",
+          value,
+          min: v.msToLocalInput(Date.now() + 120e3),
+          max: v.msToLocalInput(Date.now() + 30 * 864e5),
+          disabled: busy,
+          onChange: (e) => setValue(e.target.value),
+          "aria-label": "New scheduled date and time",
+        }),
+        h(
+          "button",
+          { className: "btn sm", disabled: busy || !value, onClick: () => v.reschedulePublish(batch, value) },
+          "Reschedule",
+        ),
+        h(
+          "button",
+          { className: "btn sm ghost", disabled: busy, onClick: () => v.cancelScheduled(batch) },
+          "Cancel scheduled posts",
+        ),
+      ),
+    );
+  }
   function PublishingHistory({ v }) {
     const state = v.publishing || {};
     if (!state.history?.length) return null;
     const status = {
+      scheduled: "Scheduled",
       queued: "Waiting",
       uploading: "Uploading video…",
       processing: "Processing…",
@@ -131,6 +163,8 @@
             { className: "small muted" },
             new Date(batch.created_at).toLocaleString(),
           ),
+          batch.jobs.some((j) => j.status === "scheduled") &&
+            h(ScheduledControls, { v, batch, busy: state.busy }),
           batch.jobs.map((job) =>
             h(
               "div",
@@ -273,9 +307,12 @@
     const remaining = (social.platforms || []).filter(
       (p) => !existing.some((j) => j.platform === p.platform),
     );
+    // Scheduled posts are waiting, not in flight: other platforms can still be posted.
     const active = existing.some(
-      (j) => !["published", "failed"].includes(j.status),
+      (j) => !["published", "failed", "scheduled"].includes(j.status),
     );
+    const when = state.when || { mode: "now", at: "" };
+    const scheduling = when.mode === "schedule";
     const allDone =
       existing.length && existing.every((j) => j.status === "published");
     const tiktok = state.settings?.tiktok || {},
@@ -745,6 +782,44 @@
                       ),
                     ),
                   h(
+                    "fieldset",
+                    { className: "field publish-when" },
+                    h("legend", { className: "field-label" }, "When to post"),
+                    h(
+                      "div",
+                      { className: "segmented", role: "group", "aria-label": "When to post" },
+                      [["now", "Post now"], ["schedule", "Schedule"]].map(([mode, label]) =>
+                        h(
+                          "button",
+                          {
+                            key: mode,
+                            type: "button",
+                            className: "segment",
+                            "aria-pressed": String(when.mode === mode),
+                            disabled: busy,
+                            onClick: () => v.setPublishWhen({ mode }),
+                          },
+                          label,
+                        ),
+                      ),
+                    ),
+                    scheduling &&
+                      h(
+                        "label",
+                        { className: "stack compact-stack" },
+                        h("span", { className: "small muted" }, "Date and time (your timezone)"),
+                        h("input", {
+                          type: "datetime-local",
+                          value: when.at,
+                          min: v.msToLocalInput(Date.now() + 120e3),
+                          max: v.msToLocalInput(Date.now() + 30 * 864e5),
+                          disabled: busy,
+                          onChange: (e) => v.setPublishWhen({ at: e.target.value }),
+                          "aria-label": "Scheduled date and time",
+                        }),
+                      ),
+                  ),
+                  h(
                     "div",
                     { className: "publish-actions" },
                     h(
@@ -768,18 +843,25 @@
                           busy ||
                           !valid ||
                           active ||
+                          (scheduling && !when.at) ||
                           selected.some((p) =>
                             existing.some((j) => j.platform === p),
                           ),
                         onClick: v.publishEverywhere,
                       },
-                      state.busy ? "Working…" : "Publish Everywhere",
+                      state.busy
+                        ? "Working…"
+                        : scheduling
+                          ? "Schedule Posts"
+                          : "Publish Everywhere",
                     ),
                   ),
                   h(
                     "p",
                     { className: "small muted" },
-                    "Publishing starts only when you click Publish Everywhere. Review all selected copy before posting.",
+                    scheduling
+                      ? "Posts go out automatically at the chosen time. You can reschedule or cancel them until then. Review all selected copy first."
+                      : "Publishing starts only when you click Publish Everywhere. Review all selected copy before posting.",
                   ),
                 ),
         ),

@@ -1,3 +1,4 @@
+from collections import Counter
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -5,8 +6,9 @@ from conftest import ready
 from cryptography.fernet import Fernet
 
 from app.social.accounts import AccountService
-from app.social.adapters.base import Identity, Tokens
+from app.social.adapters.base import Identity, ProviderError, PublishStep, Tokens
 from app.social.config import PLATFORMS, SocialSettings
+from app.social.worker import PublishWorker
 
 
 class FakeAccountAdapter:
@@ -77,3 +79,107 @@ def render(client, headers, clock, monkeypatch):
     )
     assert result.status_code == 200, result.text
     return result.json()["id"]
+
+
+# ---------- publishing: fake adapters, a worker fixture and request helpers ----------
+
+INFO = {
+    "size": 5,
+    "duration": 30,
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "format": "mp4",
+}
+
+
+class FakePublisher(FakeAccountAdapter):
+    def __init__(self, platform, calls):
+        self.platform, self.calls, self.failures = platform, calls, []
+        self.reject = False
+        # The same interface hooks the real adapters declare for these platforms.
+        self.needs_creator_info = platform == "tiktok"
+        self.supports_thumbnail = platform == "youtube"
+
+    def upload_complete(self, checkpoint):
+        return False
+
+    def creator_info(self, token):
+        return {
+            "account_name": "Fred",
+            "username": "fred",
+            "privacy_options": ["SELF_ONLY"],
+            "comment_disabled": False,
+            "duet_disabled": False,
+            "stitch_disabled": False,
+            "max_duration": 60,
+        }
+
+    def validate(self, video, metadata, creator=None):
+        if self.reject:
+            raise ProviderError("MEDIA_REJECTED")
+
+    def publish(self, token, path, info, metadata, cp):
+        self.calls[self.platform] += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return PublishStep("processing", {**cp, "uploaded": True}, delay=0)
+
+    def get_status(self, token, cp):
+        return PublishStep(
+            "published",
+            cp,
+            post_id=self.platform + "-post",
+            post_url="https://platform.example/" + self.platform,
+        )
+
+
+@pytest.fixture
+def publishing(app, social, settings, clock, monkeypatch):
+    accounts = social[0]
+    calls = Counter()
+    adapters = {p: FakePublisher(p, calls) for p in ["youtube", "tiktok", "x"]}
+    accounts.adapters = adapters
+    app.state.social_publishing.accounts = accounts
+    monkeypatch.setattr("app.social.publishing.inspect_video", lambda *args: INFO)
+    monkeypatch.setattr("app.social.worker.inspect_video", lambda *args: INFO)
+    return PublishWorker(app.state.database, settings, accounts, clock), adapters, calls
+
+
+def targets(client, headers, platforms):
+    result = []
+    for platform in platforms:
+        state, binding = connect(client, headers, platform)
+        callback(client, state, binding, platform)
+        account = next(
+            a
+            for a in client.get("/v1/social-accounts", headers=headers).json()["accounts"]
+            if a["platform"] == platform
+        )
+        from test_social_copy import COPY
+
+        metadata = dict(COPY[platform])
+        if platform == "youtube":
+            metadata["visibility"] = "private"
+        if platform == "tiktok":
+            metadata.update(privacy="SELF_ONLY", consent=True)
+        result.append(
+            {"platform": platform, "social_account_id": account["id"], platform: metadata}
+        )
+    return result
+
+
+def start(client, headers, render, selected, key="publish-once"):
+    return client.post(
+        f"/v1/renders/{render}/publish",
+        headers={**headers, "Idempotency-Key": key},
+        json={"targets": selected, "approved": True},
+    )
+
+
+def drain(worker, clock, count=20):
+    for _ in range(count):
+        if not worker.run_once():
+            clock.advance(16)

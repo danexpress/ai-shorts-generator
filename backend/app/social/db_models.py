@@ -77,6 +77,8 @@ class PublishBatch(Base):
     idempotency_key: Mapped[str] = mapped_column(String(128))
     payload_hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[int] = mapped_column(BigInteger)
+    # Requested publish time (epoch ms) for scheduled posts; null means "post now".
+    scheduled_at: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class PublishJob(Base):
@@ -106,6 +108,7 @@ class PublishJob(Base):
     retryable: Mapped[bool] = mapped_column(Boolean, default=False)
     published_at: Mapped[int | None] = mapped_column(BigInteger)
     next_attempt_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    scheduled_at: Mapped[int | None] = mapped_column(BigInteger)
     lease_owner: Mapped[str | None] = mapped_column(String(40))
     lease_until: Mapped[int | None] = mapped_column(BigInteger, index=True)
     created_at: Mapped[int] = mapped_column(BigInteger)

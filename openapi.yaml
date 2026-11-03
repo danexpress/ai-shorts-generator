@@ -1287,6 +1287,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags:
+      - Social publishing
+      summary: Reschedule
+      description: Move posts that have not started yet to a new time.
+      operationId: reschedulePublishBatch
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialReschedule'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPublishBatchView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/publish-jobs/{id}/retry:
     post:
       tags:
@@ -1544,6 +1584,41 @@ paths:
           $ref: '#/components/responses/Error409'
         '500':
           $ref: '#/components/responses/Error500'
+  /v1/publish-batches/{id}/cancel:
+    post:
+      tags:
+      - Social publishing
+      summary: Cancel Scheduled
+      description: Cancel posts that have not started yet; started or finished posts are unaffected.
+      operationId: cancelPublishBatch
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPublishBatchView'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -2794,6 +2869,10 @@ components:
         created_at:
           type: integer
           title: Created At
+        scheduled_at:
+          title: Scheduled At
+          type: integer
+          nullable: true
         jobs:
           items:
             $ref: '#/components/schemas/SocialPublishJobView'
@@ -2829,6 +2908,7 @@ components:
         status:
           type: string
           enum:
+          - scheduled
           - queued
           - uploading
           - processing
@@ -2836,6 +2916,10 @@ components:
           - published
           - failed
           title: Status
+        scheduled_at:
+          title: Scheduled At
+          type: integer
+          nullable: true
         attempt_count:
           type: integer
           title: Attempt Count
@@ -2896,6 +2980,11 @@ components:
         approved:
           type: boolean
           title: Approved
+        scheduled_at:
+          title: Scheduled At
+          type: string
+          format: date-time
+          nullable: true
       additionalProperties: false
       type: object
       required:
@@ -3307,6 +3396,144 @@ components:
             type: string
           description: Connections whose stored tokens were deleted but platform revocation failed; remove the app's
             access in that platform's settings.
+    CaptionChunkEdit:
+      properties:
+        words:
+          items:
+            $ref: '#/components/schemas/CaptionWordEdit'
+          type: array
+          maxItems: 8
+          title: Words
+      additionalProperties: false
+      type: object
+      required:
+      - words
+      title: CaptionChunkEdit
+    CaptionStyle:
+      properties:
+        font_name:
+          type: string
+          title: Font Name
+        font_size:
+          type: integer
+          title: Font Size
+        text_color:
+          type: string
+          title: Text Color
+        active_color:
+          type: string
+          title: Active Color
+        outline_color:
+          type: string
+          title: Outline Color
+        outline:
+          type: number
+          title: Outline
+        shadow:
+          type: number
+          title: Shadow
+        shadow_color:
+          type: string
+          title: Shadow Color
+        shadow_opacity:
+          type: number
+          title: Shadow Opacity
+        inactive_opacity:
+          type: number
+          title: Inactive Opacity
+        active_scale:
+          type: integer
+          title: Active Scale
+        uppercase:
+          type: boolean
+          title: Uppercase
+        letter_spacing:
+          type: number
+          title: Letter Spacing
+        line_height:
+          type: number
+          title: Line Height
+        position:
+          type: number
+          title: Position
+        css_font_size:
+          type: number
+          title: Css Font Size
+        max_width:
+          type: number
+          title: Max Width
+      type: object
+      required:
+      - font_name
+      - font_size
+      - text_color
+      - active_color
+      - outline_color
+      - outline
+      - shadow
+      - shadow_color
+      - shadow_opacity
+      - inactive_opacity
+      - active_scale
+      - uppercase
+      - letter_spacing
+      - line_height
+      - position
+      - css_font_size
+      - max_width
+      title: CaptionStyle
+    CaptionWordEdit:
+      properties:
+        text:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Text
+        start:
+          type: number
+          title: Start
+        end:
+          type: number
+          title: End
+        estimated:
+          type: boolean
+          title: Estimated
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - text
+      - start
+      - end
+      title: CaptionWordEdit
+    ClipSignals:
+      properties:
+        loudnessLu:
+          type: number
+          title: Loudnesslu
+        sceneChanges:
+          type: integer
+          title: Scenechanges
+        adjustment:
+          type: number
+          title: Adjustment
+      type: object
+      required:
+      - loudnessLu
+      - sceneChanges
+      - adjustment
+      title: ClipSignals
+    SocialReschedule:
+      properties:
+        scheduled_at:
+          type: string
+          format: date-time
+          title: Scheduled At
+      additionalProperties: false
+      type: object
+      required:
+      - scheduled_at
+      title: SocialReschedule
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

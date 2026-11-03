@@ -44,7 +44,9 @@ class PublishWorker:
             jobs = db.scalars(
                 select(PublishJob)
                 .where(
-                    PublishJob.status.in_(["queued", "uploading", "processing", "publishing"]),
+                    PublishJob.status.in_(
+                        ["scheduled", "queued", "uploading", "processing", "publishing"]
+                    ),
                     PublishJob.next_attempt_at <= now,
                     or_(PublishJob.lease_until.is_(None), PublishJob.lease_until <= now),
                 )
@@ -69,6 +71,8 @@ class PublishWorker:
                     self.owner,
                     now + self.accounts.settings.lease_seconds * 1000,
                 )
+                if job.status == "scheduled":  # its time has come: publish as usual
+                    job.status = "queued"
                 if job.status == "queued":
                     job.attempt_count += 1
                 job.updated_at = now
@@ -120,7 +124,8 @@ class PublishWorker:
                     if job.checkpoint_encrypted
                     else {}
                 )
-                if self.now() - job.created_at > 24 * 3600_000:
+                # Measured from when publishing was due to start, not when it was requested.
+                if self.now() - (job.scheduled_at or job.created_at) > 24 * 3600_000:
                     raise ProviderError("PUBLISH_UNCERTAIN")
                 # Processing/post creation can finish even after the local media expires.
                 adapter = self.accounts.adapter(job.platform)

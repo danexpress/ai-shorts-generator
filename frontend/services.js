@@ -52,6 +52,9 @@
     ACCOUNT_CONFLICT: 'This email is already linked to a different Google account.',
     PASSWORD_LOGIN_DISABLED: 'Sign in with Google.',
     CONFIRMATION_MISMATCH: 'Type your account email exactly to confirm.',
+    SCHEDULE_IN_PAST: 'Choose a time at least a minute from now.',
+    SCHEDULE_TOO_FAR: 'Posts can be scheduled up to 30 days ahead.',
+    NOT_SCHEDULED: 'These posts already started publishing or were canceled.',
     CSRF_FAILED: 'For your security, refresh the page and try again.',
     NO_HIGHLIGHTS: 'We couldn’t find a 20–40 second moment that works as a standalone Short in this video. Try a longer video with more speech.',
     NO_SPEECH: 'We couldn’t hear any speech in this video (it may be silent or music only), so there are no captions or highlights. Try a video with spoken audio.',
@@ -97,6 +100,8 @@
     ['publishRender', 'POST', '/v1/renders/{id}/publish'],
     ['getPublishBatch', 'GET', '/v1/publish-batches/{id}'],
     ['retryPublishJob', 'POST', '/v1/publish-jobs/{id}/retry'],
+    ['reschedulePublishBatch', 'PATCH', '/v1/publish-batches/{id}'],
+    ['cancelPublishBatch', 'POST', '/v1/publish-batches/{id}/cancel'],
     ['getPublishingHistory', 'GET', '/v1/renders/{id}/publishing-history'],
 
     ['listSocialAccounts', 'GET', '/v1/social-accounts'],
@@ -195,6 +200,18 @@
   }
 
   function round3(n) { return Math.round(n * 1000) / 1000; }
+
+  // <input type="datetime-local"> values are wall-clock times in the viewer's timezone.
+  function localInputToIso(value) {
+    if (!value) return null;
+    const date = new Date(value);  // parsed as local time
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  function msToLocalInput(ms) {
+    const date = new Date(ms);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
 
   function suggestionCount(durationSec) {
     const m = durationSec / 60;
@@ -884,7 +901,7 @@
     api.listCaptionPresets = () => op(() => { requireUser(); return clone(CAPTION_PRESETS); });
     api.getCaptions = api.saveCaptions = () => op(() => { requireUser(); throw new ApiError('CAPTIONS_UNAVAILABLE', null, 503); });
 
-    for (const method of ['getSocialCopy','generateSocialCopy','regenerateSocialCopy','saveSocialCopy','getTikTokCreatorInfo','publishRender','getPublishBatch','retryPublishJob','getPublishingHistory']) api[method] = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
+    for (const method of ['getSocialCopy','generateSocialCopy','regenerateSocialCopy','saveSocialCopy','getTikTokCreatorInfo','publishRender','getPublishBatch','retryPublishJob','reschedulePublishBatch','cancelPublishBatch','getPublishingHistory']) api[method] = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
     // Test/demo hooks — deliberately outside the API contract.
     Object.defineProperty(api, '_mock', {
@@ -928,5 +945,5 @@
     return api;
   }
 
-  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, googleSignInUrl, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance, captionLines, retimeCaptionText, nudgeCaption };
+  return { CONFIG, ERROR_COPY, ApiError, ENDPOINTS, API_METHODS, createApi, createHttpApi, createMockApi, googleSignInUrl, validateClips, combinedScore, suggestionCount, alignSegment, validateGuidance, captionLines, retimeCaptionText, nudgeCaption, localInputToIso, msToLocalInput };
 });

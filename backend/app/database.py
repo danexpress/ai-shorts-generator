@@ -76,6 +76,8 @@ class Database:
             "renders": [("framing", "VARCHAR(10)"), ("captions", "JSON")],
             "users": [("google_sub", "VARCHAR(255)"), ("avatar_url", "TEXT")],
             "auth_tokens": [("session_id", "VARCHAR(40)")],
+            "publish_batches": [("scheduled_at", "BIGINT")],
+            "publish_jobs": [("scheduled_at", "BIGINT")],
         }
         for table, columns in additions.items():
             existing = {column["name"] for column in inspect(self.engine).get_columns(table)}

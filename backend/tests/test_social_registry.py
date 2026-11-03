@@ -4,7 +4,7 @@ from typing import ClassVar
 
 import pytest
 from cryptography.fernet import Fernet
-from test_social_publishing import INFO, drain, start, targets
+from social_helpers import INFO, drain, start, targets
 
 from app.social.accounts import AccountService
 from app.social.adapters import BUILTIN, load_adapter, publishers

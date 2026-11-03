@@ -5,7 +5,7 @@ import json
 
 from sqlalchemy import select
 
-from ..db_models import ProjectRecord
+from ..db_models import ProjectRecord, RenderRecord
 from ..errors import ApiError
 from ..store import oid
 from .accounts import event, rate_limit, safe_error
@@ -13,6 +13,10 @@ from .adapters.base import ProviderError
 from .copy import owned_render
 from .db_models import PublishBatch, PublishJob, SocialAccount
 from .video import inspect_video
+
+DAY = 86_400_000
+MIN_SCHEDULE_LEAD = 60_000  # at least a minute ahead
+MAX_SCHEDULE_AHEAD = 30 * DAY
 
 
 class PublishingService:
@@ -26,6 +30,23 @@ class PublishingService:
 
     def now(self):
         return int(self.clock() * 1000)
+
+    def schedule_time(self, when) -> int | None:
+        """Validated epoch ms for a scheduled post, or None to post now."""
+        if when is None:
+            return None
+        at = int(when.timestamp() * 1000)
+        if at < self.now() + MIN_SCHEDULE_LEAD:
+            raise ApiError("SCHEDULE_IN_PAST", "Choose a time at least a minute from now.", 422)
+        if at > self.now() + MAX_SCHEDULE_AHEAD:
+            raise ApiError("SCHEDULE_TOO_FAR", "Schedule posts up to 30 days ahead.", 422)
+        return at
+
+    def keep_render(self, db, render_id, scheduled_at):
+        # Renders normally expire after 7 days; keep this one until a day after it posts.
+        render = db.get(RenderRecord, render_id)
+        if render and scheduled_at:
+            render.expiresAt = max(render.expiresAt, scheduled_at + DAY)
 
     def same_account(self, db, job):
         return db.scalar(
@@ -48,6 +69,7 @@ class PublishingService:
             "error_code",
             "error_message_safe",
             "published_at",
+            "scheduled_at",
             "created_at",
             "updated_at",
         )
@@ -78,6 +100,7 @@ class PublishingService:
             "id": batch.id,
             "render_id": batch.render_id,
             "created_at": batch.created_at,
+            "scheduled_at": batch.scheduled_at,
             "jobs": [self.job_view(db, j) for j in jobs],
         }
 
@@ -106,7 +129,9 @@ class PublishingService:
                 project = db.get(ProjectRecord, batches[0].project_id)
                 if not project or project.status == "deleted":
                     raise ApiError("NOT_FOUND", "Project not found.", 404)
-            return [self.batch_view(db, b) for b in batches]
+            # A batch whose scheduled posts were all canceled has no history to show.
+            views = [self.batch_view(db, b) for b in batches]
+            return [view for view in views if view["jobs"]]
 
     def start(self, user_id, render_id, body, key):
         if not key or not 1 <= len(key) <= 128:
@@ -132,6 +157,7 @@ class PublishingService:
                         409,
                     )
                 return self.batch_view(db, previous)
+            scheduled_at = self.schedule_time(body.scheduled_at)
             record, path = owned_render(
                 db, user_id, render_id, self.now(), True, self.app_settings.media_dir
             )
@@ -231,9 +257,11 @@ class PublishingService:
                 idempotency_key=key,
                 payload_hash=payload_hash,
                 created_at=self.now(),
+                scheduled_at=scheduled_at,
             )
             db.add(batch)
             db.flush()
+            self.keep_render(db, render_id, scheduled_at)
             for target in body.targets:
                 failure = errors.get(target.platform)
                 job = PublishJob(
@@ -244,7 +272,7 @@ class PublishingService:
                     platform=target.platform,
                     platform_user_id=account_ids[target.platform][1],
                     social_account_id=target.social_account_id,
-                    status="failed" if failure else "queued",
+                    status="failed" if failure else ("scheduled" if scheduled_at else "queued"),
                     attempt_count=0,
                     post_metadata={
                         **getattr(target, target.platform).model_dump(),
@@ -255,7 +283,8 @@ class PublishingService:
                     error_code=failure.code if failure else None,
                     error_message_safe=safe_error(failure) if failure else None,
                     retryable=failure.retryable if failure else False,
-                    next_attempt_at=self.now(),
+                    next_attempt_at=scheduled_at or self.now(),
+                    scheduled_at=scheduled_at,
                     created_at=self.now(),
                     updated_at=self.now(),
                 )
@@ -265,7 +294,58 @@ class PublishingService:
                         db, user_id, "platform_publish_failed", self.now(), target.platform, job.id
                     )
             db.flush()
-            event(db, user_id, "publish_started", self.now(), resource=batch.id)
+            event(
+                db,
+                user_id,
+                "publish_scheduled" if scheduled_at else "publish_started",
+                self.now(),
+                resource=batch.id,
+            )
+            return self.batch_view(db, batch)
+
+    def scheduled_jobs(self, db, user_id, batch_id):
+        """The batch and its jobs that are still waiting for their time (never started)."""
+        batch = db.get(PublishBatch, batch_id)
+        if not batch or batch.user_id != user_id:
+            raise ApiError("NOT_FOUND", "Publishing batch not found.", 404)
+        project = db.get(ProjectRecord, batch.project_id)
+        if not project or project.status == "deleted":
+            raise ApiError("NOT_FOUND", "Project not found.", 404)
+        now = self.now()
+        jobs = [
+            job
+            for job in db.scalars(select(PublishJob).where(PublishJob.publish_batch_id == batch.id))
+            if job.status == "scheduled" and not (job.lease_until and job.lease_until > now)
+        ]
+        if not jobs:
+            raise ApiError(
+                "NOT_SCHEDULED",
+                "These posts have already started publishing or were canceled.",
+                409,
+            )
+        return batch, jobs
+
+    def reschedule(self, user_id, batch_id, when):
+        scheduled_at = self.schedule_time(when)
+        with self.database.transaction() as db:
+            batch, jobs = self.scheduled_jobs(db, user_id, batch_id)
+            for job in jobs:
+                job.scheduled_at = job.next_attempt_at = scheduled_at
+                job.updated_at = self.now()
+            batch.scheduled_at = scheduled_at
+            self.keep_render(db, batch.render_id, scheduled_at)
+            event(db, user_id, "publish_rescheduled", self.now(), resource=batch.id)
+            return self.batch_view(db, batch)
+
+    def cancel(self, user_id, batch_id):
+        """Cancel posts that have not started. Nothing was sent to any platform, so the
+        jobs are removed and the Short can be published to those accounts again."""
+        with self.database.transaction() as db:
+            batch, jobs = self.scheduled_jobs(db, user_id, batch_id)
+            for job in jobs:
+                event(db, user_id, "publish_canceled", self.now(), job.platform, job.id)
+                db.delete(job)
+            db.flush()
             return self.batch_view(db, batch)
 
     def retry(self, user_id, job_id):
