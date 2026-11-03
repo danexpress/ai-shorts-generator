@@ -26,6 +26,9 @@ class SocialSettings:
     encryption_keys: str = field(
         default_factory=lambda: os.getenv("SOCIAL_TOKEN_ENCRYPTION_KEYS", ""), repr=False
     )
+    # Optional AWS KMS envelope encryption for stored tokens (`uv sync --extra kms`).
+    kms_key_id: str = field(default_factory=lambda: os.getenv("TOKEN_KMS_KEY_ID", "").strip())
+    kms_region: str = field(default_factory=lambda: os.getenv("TOKEN_KMS_REGION", "").strip())
     allow_local_http: bool = field(default_factory=lambda: flag("SOCIAL_ALLOW_INSECURE_LOCALHOST"))
     enabled: dict = field(
         default_factory=lambda: {p: flag(f"ENABLE_{p.upper()}_PUBLISHING") for p in PLATFORMS}
@@ -97,7 +100,7 @@ class SocialSettings:
         return bool(
             self.enabled.get(platform)
             and (not needs_client or (client.get("id") and client.get("secret")))
-            and self.encryption_keys
+            and (self.encryption_keys or self.kms_key_id)
             and self.valid_url(self.public_url, platform)
             and self.valid_url(self.frontend_url, platform)
         )

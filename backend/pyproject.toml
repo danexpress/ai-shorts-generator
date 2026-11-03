@@ -25,6 +25,9 @@ dependencies = [
 align = [
     "whisperx>=3.3",
 ]
+kms = [
+    "boto3>=1.34,<2",
+]
 
 [dependency-groups]
 dev = [

@@ -79,7 +79,9 @@ class AccountService:
             clock,
             adapters,
         )
-        self.cipher = TokenCipher(settings.encryption_keys)
+        self.cipher = TokenCipher(
+            settings.encryption_keys, settings.kms_key_id, kms_region=settings.kms_region
+        )
 
     def now(self):
         return int(self.clock() * 1000)
@@ -91,7 +93,7 @@ class AccountService:
             or platform not in self.adapters
         ):
             raise ApiError("SOCIAL_UNAVAILABLE", "This platform is not configured yet.", 503)
-        self.cipher.cipher()  # Fail closed on an invalid encryption key.
+        self.cipher.check()  # Fail closed on an invalid or missing encryption key.
         return self.adapters[platform]
 
     def list(self, user_id):

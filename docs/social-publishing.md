@@ -112,7 +112,17 @@ Generate a persistent Fernet key once (from `backend/`):
 uv run --locked python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-Store it in your secret manager, never commit it. `SOCIAL_TOKEN_ENCRYPTION_KEYS` supports comma-separated keys: first encrypts new values, all decrypt older values. Keep old keys until existing account tokens and checkpoints have been re-encrypted or accounts reconnected. Losing the keys requires reconnecting accounts; replacing them at every restart breaks saved connections.
+Store it in your secret manager, never commit it.
+
+**Optional AWS KMS envelope encryption.** Install the extra (`uv sync --extra kms`) and set `TOKEN_KMS_KEY_ID` (a symmetric KMS key ARN or alias), plus `TOKEN_KMS_REGION` or the usual AWS region and credentials environment.
+- **How values are stored:** new token and checkpoint values use a data key from `GenerateDataKey` (AES-256) and are stored as `kms1:<KMS-wrapped data key>.<Fernet token>`. The plaintext data key only ever lives in memory.
+- **Binding:** values stay bound to their creator and platform as before, and every data key carries the encryption context `purpose=ai-shorts-social-tokens`.
+- **Fewer KMS calls:** each process reuses a data key for up to 5 minutes or 10,000 encryptions and caches unwrapped keys, so chunked uploads don't call KMS for every checkpoint.
+- **Failures:** if KMS is unavailable the operation fails closed and nothing is written in plaintext.
+- **IAM permissions:** grant `kms:GenerateDataKey` and `kms:Decrypt` on that key, ideally with `"Condition": {"StringEquals": {"kms:EncryptionContext:purpose": "ai-shorts-social-tokens"}}`.
+- **Rolling it out:** existing Fernet values keep decrypting while `SOCIAL_TOKEN_ENCRYPTION_KEYS` is still set, and are re-encrypted with KMS as tokens refresh or accounts reconnect. Remove the Fernet keys only after that, since without them older values can't be read and those accounts must reconnect.
+- **Rotation:** KMS key rotation is transparent, because wrapped data keys stay decryptable.
+- **Testing:** this path is tested against a fake KMS that enforces key ID and context, and its API names were checked against boto3's KMS model; it has not been run against a live AWS account. `SOCIAL_TOKEN_ENCRYPTION_KEYS` supports comma-separated keys: first encrypts new values, all decrypt older values. Keep old keys until existing account tokens and checkpoints have been re-encrypted or accounts reconnected. Losing the keys requires reconnecting accounts; replacing them at every restart breaks saved connections.
 
 Set each `ENABLE_*_PUBLISHING=true` only after its corresponding app credentials and registered callback are ready. `YOUTUBE_CLIENT_ID` is the Google Web client ID. `TIKTOK_CLIENT_ID` is TikTok's **client key**. `X_CLIENT_ID` is the confidential OAuth 2 client ID. Verification/audit flags describe actual portal approval; setting them does not grant provider approval. Private visibility remains the default for YouTube; TikTok requires an explicit selection from live creator options and separate posting consent.
 
