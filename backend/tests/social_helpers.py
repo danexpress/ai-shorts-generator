@@ -106,6 +106,15 @@ class FakePublisher(FakeAccountAdapter):
     def upload_complete(self, checkpoint):
         return False
 
+    # Quota hooks (untracked by default; quota tests set limits and costs).
+    quota_timezone = "UTC"
+
+    def quota_limits(self):
+        return getattr(self, "limits", {})
+
+    def quota_costs(self, action, checkpoint):
+        return getattr(self, "costs", {}).get(action, {})
+
     def creator_info(self, token):
         return {
             "account_name": "Fred",

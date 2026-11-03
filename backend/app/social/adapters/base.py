@@ -147,3 +147,16 @@ class SocialPublisher(ABC):
 
     def set_thumbnail(self, token, post_id, image):
         raise ProviderError("UNSUPPORTED")
+
+    # Daily API quotas (per developer app, shared by all users). The worker reserves
+    # the cost of each call first and, when a bucket would overflow, holds the job
+    # until the reset instead of failing it.
+    quota_timezone = "UTC"  # buckets reset at midnight in this zone
+
+    def quota_limits(self) -> dict[str, int]:
+        """{bucket: units per day}; empty means the platform's quota is not tracked."""
+        return {}
+
+    def quota_costs(self, action: str, checkpoint) -> dict[str, int]:
+        """Units the next call consumes, per bucket. action: publish, status, thumbnail, post."""
+        return {}

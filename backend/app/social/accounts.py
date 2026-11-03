@@ -16,6 +16,7 @@ from .security import TokenCipher, digest
 SAFE_ERRORS = {
     "RECONNECT_REQUIRED": "This connection has expired. Reconnect the account to continue.",
     "PERMISSION_REQUIRED": "The account has not granted the required permissions. Reconnect it or check your developer app access.",
+    "QUOTA_EXCEEDED": "The platform's daily limit for this app was reached. This post continues automatically after the limit resets.",
     "PRIVATE_POSTING_ONLY": "This integration can currently publish private posts only. Check the account and visibility settings.",
     "PROVIDER_RATE_LIMITED": "The platform is busy. Try again later.",
     "PROVIDER_UNAVAILABLE": "The platform could not be reached. Try again later.",

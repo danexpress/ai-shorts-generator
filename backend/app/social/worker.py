@@ -4,8 +4,11 @@ Each claim/checkpoint commits before provider I/O. Jobs are leased across proces
 upload session capabilities are encrypted. No raw provider errors are logged.
 """
 
+import logging
 import signal
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import or_, select
 
@@ -19,10 +22,24 @@ from .adapters import publishers
 from .adapters.base import ProviderError
 from .config import SocialSettings
 from .copy import owned_render
-from .db_models import PublishBatch, PublishJob, SocialAccount
+from .db_models import ProviderQuotaUsage, PublishBatch, PublishJob, SocialAccount
 from .http import ProviderHTTP
 from .thumbnail import cover_image
 from .video import inspect_video
+
+logger = logging.getLogger(__name__)
+QUOTA_NOTICE = (
+    "This app reached the platform's daily upload limit. Your post is queued and continues "
+    "automatically after the limit resets."
+)
+
+
+class QuotaWait(Exception):
+    """A daily quota bucket is full; hold the job until `reset_ms`."""
+
+    def __init__(self, reset_ms):
+        super().__init__(reset_ms)
+        self.reset_ms = reset_ms
 
 
 class PublishWorker:
@@ -92,11 +109,69 @@ class PublishWorker:
             job.checkpoint_encrypted = self.accounts.cipher.encrypt(cp, job.user_id, job.platform)
             job.lease_until = self.now() + self.accounts.settings.lease_seconds * 1000
 
+    def quota_day(self, adapter):
+        """(day key, next reset in epoch ms) in the adapter's quota timezone."""
+        try:
+            zone = ZoneInfo(adapter.quota_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            zone = ZoneInfo("UTC")
+        local = datetime.fromtimestamp(self.now() / 1000, zone)
+        reset = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), zone)
+        return local.date().isoformat(), int(reset.timestamp() * 1000)
+
+    def spend(self, adapter, action, cp):
+        """Reserve the call's quota before making it, or raise QuotaWait."""
+        limits = adapter.quota_limits()
+        costs = {b: c for b, c in adapter.quota_costs(action, cp).items() if c and b in limits}
+        if not costs:
+            return
+        day, reset = self.quota_day(adapter)
+        with self.database.transaction() as db:
+            rows = {}
+            for bucket in costs:
+                row = db.get(ProviderQuotaUsage, (bucket, day))
+                if row is None:
+                    row = ProviderQuotaUsage(bucket=bucket, day=day, units=0)
+                    db.add(row)
+                rows[bucket] = row
+            if any(rows[b].units + cost > limits[b] for b, cost in costs.items()):
+                raise QuotaWait(reset)
+            for bucket, cost in costs.items():
+                rows[bucket].units += cost
+
+    def exhaust(self, adapter, action, cp):
+        """The platform says a quota is spent (e.g. shared with another app): mark it full."""
+        limits = adapter.quota_limits()
+        buckets = [b for b in adapter.quota_costs(action, cp) if b in limits] or list(limits)
+        day, reset = self.quota_day(adapter)
+        with self.database.transaction() as db:
+            for bucket in buckets:
+                row = db.get(ProviderQuotaUsage, (bucket, day))
+                if row is None:
+                    db.add(ProviderQuotaUsage(bucket=bucket, day=day, units=limits[bucket]))
+                else:
+                    row.units = max(row.units, limits[bucket])
+        return reset
+
+    def hold_for_quota(self, job_id, reset_ms):
+        """Requeue for just after the reset without using up a retry attempt."""
+        with self.database.transaction() as db:
+            job = db.get(PublishJob, job_id)
+            if not job or job.lease_owner != self.owner:
+                return
+            if job.status == "queued":
+                job.attempt_count = max(0, job.attempt_count - 1)  # claim counted it
+            job.next_attempt_at = reset_ms + 60_000
+            job.error_code, job.error_message_safe = None, QUOTA_NOTICE
+            job.lease_owner = job.lease_until = None
+            job.updated_at = self.now()
+        logger.info("Publish job %s held for quota until %s", job_id, reset_ms)
+
     def run_once(self):
         job_id = self.claim()
         if not job_id:
             return False
-        cp = {}
+        cp, adapter, action = {}, None, None
         try:
             with self.database.transaction() as db:
                 job = db.get(PublishJob, job_id)
@@ -140,6 +215,8 @@ class PublishWorker:
             if cp.get("post_request_started"):
                 raise ProviderError("PUBLISH_UNCERTAIN")
             if values["status"] == "publishing":
+                action = "post"
+                self.spend(adapter, action, cp)
                 cp["post_request_started"] = True
                 self.save_checkpoint(job_id, cp)
                 try:
@@ -152,6 +229,8 @@ class PublishWorker:
                         raise ProviderError("PUBLISH_UNCERTAIN") from None
                     raise
             elif values["status"] == "processing" or adapter.upload_complete(cp):
+                action = "status"
+                self.spend(adapter, action, cp)
                 step = adapter.get_status(token, cp)
             else:
                 if path is None:
@@ -161,6 +240,8 @@ class PublishWorker:
                     self.save_checkpoint(job_id, cp)
                 if not adapter.needs_creator_info:  # those were validated at admission
                     adapter.validate(cp["video_info"], values["post_metadata"])
+                action = "publish"
+                self.spend(adapter, action, cp)
                 step = adapter.publish(token, path, cp["video_info"], values["post_metadata"], cp)
             if (
                 step.status == "published"
@@ -169,6 +250,7 @@ class PublishWorker:
             ):
                 # Replacing the cover for a known video ID cannot create another post.
                 try:
+                    self.spend(adapter, "thumbnail", cp)
                     with self.database.transaction() as db:
                         _, cover_path = owned_render(
                             db,
@@ -211,10 +293,15 @@ class PublishWorker:
                         job.platform,
                         job.id,
                     )
+        except QuotaWait as wait:
+            self.hold_for_quota(job_id, wait.reset_ms)
         except (ProviderError, ApiError) as error:
             if isinstance(error, ApiError):
                 error = ProviderError(error.code)
-            self.fail(job_id, error)
+            if error.code == "QUOTA_EXCEEDED" and adapter is not None:
+                self.hold_for_quota(job_id, self.exhaust(adapter, action, cp))
+            else:
+                self.fail(job_id, error)
         except Exception:  # noqa: BLE001 - contain adapter bugs without leaking secrets or repeating posts
             # An unexpected adapter/schema bug is never a reason to duplicate a post.
             self.fail(

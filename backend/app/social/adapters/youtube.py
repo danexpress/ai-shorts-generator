@@ -4,10 +4,48 @@ import re
 
 from .base import Identity, ProviderError, PublishStep, SocialPublisher, Tokens
 
+TITLE_LIMIT, DESCRIPTION_BYTES = 100, 5000
+
+
+def with_shorts_tag(title: str, description: str, hashtags: list[str]) -> tuple[str, str]:
+    """Title and description with #Shorts added where missing and it fits.
+
+    The tag always goes in the description's hashtag line (unless it would exceed
+    YouTube's 5,000-byte limit) and in the title when it fits in 100 characters.
+    """
+    tags = list(hashtags)
+    present = lambda text: "#shorts" in text.lower()
+    if not any(present(t) for t in [title, description, *tags]):
+        tags.append("#Shorts")
+    full = description + ("\n\n" + " ".join(tags) if tags else "")
+    if len(full.encode("utf-8")) > DESCRIPTION_BYTES:
+        full = description + ("\n\n" + " ".join(hashtags) if hashtags else "")
+    if not present(title) and len(title) + len(" #Shorts") <= TITLE_LIMIT:
+        title = title + " #Shorts"
+    return title, full
+
 
 class YouTubePublisher(SocialPublisher):
     platform = "youtube"
     supports_thumbnail = True
+    quota_timezone = "America/Los_Angeles"  # YouTube quotas reset at midnight Pacific
+
+    def quota_limits(self):
+        return {
+            "youtube:uploads": self.settings.youtube_daily_uploads,
+            "youtube:units": self.settings.youtube_daily_units,
+        }
+
+    def quota_costs(self, action, checkpoint):
+        if action == "publish":
+            # Only starting the resumable session is a videos.insert call; chunks are free.
+            return {} if checkpoint.get("upload_url") else {"youtube:uploads": 1}
+        if action == "status":
+            return {"youtube:units": 1}  # videos.list
+        if action == "thumbnail":
+            return {"youtube:units": 50}  # thumbnails.set
+        return {}
+
     scopes = (
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
@@ -80,9 +118,9 @@ class YouTubePublisher(SocialPublisher):
         cp = dict(checkpoint)
         headers = {"Authorization": "Bearer " + token}
         if not cp.get("upload_url"):
-            description = metadata["description"]
-            if metadata.get("hashtags"):
-                description += "\n\n" + " ".join(metadata["hashtags"])
+            title, description = with_shorts_tag(
+                metadata["title"], metadata["description"], metadata.get("hashtags") or []
+            )
             response = self.http.request(
                 "POST",
                 "https://www.googleapis.com/upload/youtube/v3/videos",
@@ -95,7 +133,7 @@ class YouTubePublisher(SocialPublisher):
                 params={"uploadType": "resumable", "part": "snippet,status"},
                 json={
                     "snippet": {
-                        "title": metadata["title"],
+                        "title": title,
                         "description": description,
                         "categoryId": "22",
                     },

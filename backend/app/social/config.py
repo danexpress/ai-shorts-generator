@@ -47,6 +47,14 @@ class SocialSettings:
         }
     )
     youtube_verified: bool = field(default_factory=lambda: flag("YOUTUBE_PUBLISHING_VERIFIED"))
+    # YouTube Data API defaults: videos.insert has its own bucket of 100 calls/day;
+    # other calls share 10,000 units/day. Raise them after Google grants more quota.
+    youtube_daily_uploads: int = field(
+        default_factory=lambda: int(os.getenv("YOUTUBE_DAILY_UPLOADS", "100"))
+    )
+    youtube_daily_units: int = field(
+        default_factory=lambda: int(os.getenv("YOUTUBE_DAILY_UNITS", "10000"))
+    )
     tiktok_audited: bool = field(default_factory=lambda: flag("TIKTOK_PUBLISHING_AUDITED"))
     copy_url: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_API_URL", ""))
     copy_key: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_API_KEY", ""), repr=False)

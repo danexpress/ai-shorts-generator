@@ -115,6 +115,15 @@ class PublishJob(Base):
     updated_at: Mapped[int] = mapped_column(BigInteger)
 
 
+class ProviderQuotaUsage(Base):
+    """Units of a platform's daily API quota used per bucket and (platform-local) day."""
+
+    __tablename__ = "provider_quota_usage"
+    bucket: Mapped[str] = mapped_column(String(40), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    units: Mapped[int] = mapped_column(Integer)
+
+
 class SocialEvent(Base):
     __tablename__ = "social_events"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)

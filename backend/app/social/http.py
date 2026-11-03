@@ -56,6 +56,11 @@ class ProviderHTTP:
                 code, retry = "RECONNECT_REQUIRED", False
             elif reason in {"scope_not_authorized", "insufficientPermissions"}:
                 code, retry = "PERMISSION_REQUIRED", False
+            elif reason in {"quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded"}:
+                # Daily limits: the worker waits for the reset instead of failing.
+                code, retry = "QUOTA_EXCEEDED", False
+            elif reason in {"rateLimitExceeded", "userRateLimitExceeded"}:
+                code, retry = "PROVIDER_RATE_LIMITED", True
             elif reason in {
                 "unaudited_client_can_only_post_to_private_accounts",
                 "privacy_level_option_mismatch",
