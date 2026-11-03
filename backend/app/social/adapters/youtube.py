@@ -114,7 +114,7 @@ class YouTubePublisher(SocialPublisher):
         ):
             raise ProviderError("PRIVATE_POSTING_ONLY")
 
-    def publish(self, token, video, info, metadata, checkpoint):
+    def publish(self, token, video, info, metadata, checkpoint, media_url=None):
         cp = dict(checkpoint)
         headers = {"Authorization": "Bearer " + token}
         if not cp.get("upload_url"):

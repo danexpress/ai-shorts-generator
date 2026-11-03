@@ -51,7 +51,7 @@ class UnifiedPublisher(SocialPublisher):
     def validate(self, video, metadata, creator=None):
         pass
 
-    def publish(self, token, video, info, metadata, checkpoint):
+    def publish(self, token, video, info, metadata, checkpoint, media_url=None):
         UnifiedPublisher.calls[self.platform] += 1
         return PublishStep("processing", {**checkpoint, "job": self.platform}, delay=0)
 
@@ -140,11 +140,8 @@ def test_unified_adapter_runs_the_unchanged_connect_and_publish_flow(
         p["platform"]: p["enabled"]
         for p in client.get("/v1/social-accounts", headers=headers).json()["platforms"]
     }
-    assert listed == {
-        "youtube": False,
-        "tiktok": True,
-        "x": True,
-    }  # youtube lacks its own client keys
+    # YouTube and Instagram use built-in adapters, which lack client keys here.
+    assert listed == {"youtube": False, "tiktok": True, "x": True, "instagram": False}
     connected = client.get("/v1/social-accounts/x/connect", headers=headers).json()
     assert connected["authorization_url"].startswith("https://unified.example/link?platform=x")
 

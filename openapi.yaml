@@ -913,6 +913,7 @@ paths:
           - youtube
           - tiktok
           - x
+          - instagram
           type: string
           title: Platform
       responses:
@@ -949,6 +950,7 @@ paths:
           - youtube
           - tiktok
           - x
+          - instagram
           type: string
           title: Platform
       - name: state
@@ -1006,6 +1008,7 @@ paths:
           - youtube
           - tiktok
           - x
+          - instagram
           type: string
           title: Platform
       responses:
@@ -2624,6 +2627,7 @@ components:
           - youtube
           - tiktok
           - x
+          - instagram
           title: Platform
         account_name:
           type: string
@@ -2680,6 +2684,7 @@ components:
           - youtube
           - tiktok
           - x
+          - instagram
           title: Platform
         enabled:
           type: boolean
@@ -2723,6 +2728,7 @@ components:
             - $ref: '#/components/schemas/YouTubeCopy'
             - $ref: '#/components/schemas/TikTokCopy'
             - $ref: '#/components/schemas/XCopy'
+            - $ref: '#/components/schemas/InstagramCopy'
           type: object
           title: Copy
         updated_at:
@@ -2795,8 +2801,9 @@ components:
             - youtube
             - tiktok
             - x
+            - instagram
           type: array
-          maxItems: 3
+          maxItems: 4
           minItems: 1
           title: Platforms
       additionalProperties: false
@@ -2896,6 +2903,7 @@ components:
           - youtube
           - tiktok
           - x
+          - instagram
           title: Platform
         social_account_id:
           title: Social Account Id
@@ -2974,7 +2982,7 @@ components:
           items:
             $ref: '#/components/schemas/SocialPublishTarget'
           type: array
-          maxItems: 3
+          maxItems: 4
           minItems: 1
           title: Targets
         approved:
@@ -2999,6 +3007,7 @@ components:
           - youtube
           - tiktok
           - x
+          - instagram
           title: Platform
         social_account_id:
           type: string
@@ -3016,6 +3025,10 @@ components:
         x:
           allOf:
           - $ref: '#/components/schemas/XCopy'
+          nullable: true
+        instagram:
+          allOf:
+          - $ref: '#/components/schemas/InstagramPost'
           nullable: true
       additionalProperties: false
       type: object
@@ -3534,6 +3547,48 @@ components:
       required:
       - scheduled_at
       title: SocialReschedule
+    InstagramCopy:
+      properties:
+        caption:
+          type: string
+          maxLength: 2200
+          minLength: 1
+          title: Caption
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 30
+          title: Hashtags
+      additionalProperties: false
+      type: object
+      required:
+      - caption
+      - hashtags
+      title: InstagramCopy
+    InstagramPost:
+      properties:
+        caption:
+          type: string
+          maxLength: 2200
+          minLength: 1
+          title: Caption
+        hashtags:
+          items:
+            type: string
+          type: array
+          maxItems: 30
+          title: Hashtags
+        share_to_feed:
+          type: boolean
+          title: Share To Feed
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - caption
+      - hashtags
+      title: InstagramPost
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

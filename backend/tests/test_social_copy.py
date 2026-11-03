@@ -22,6 +22,10 @@ COPY = {
         "hashtags": ["#hiring"],
     },
     "x": {"text": "Plan your next hire for the work ahead, not just the team you have today."},
+    "instagram": {
+        "caption": "Hire for the company you will be, not the one you are.",
+        "hashtags": ["#hiring", "#startups"],
+    },
 }
 
 
@@ -38,7 +42,12 @@ class FakeModel:
             COPY
             if schema.get("title") == "SocialCopyBundle"
             else COPY[
-                {"YouTubeCopy": "youtube", "TikTokCopy": "tiktok", "XCopy": "x"}[schema["title"]]
+                {
+                    "YouTubeCopy": "youtube",
+                    "TikTokCopy": "tiktok",
+                    "XCopy": "x",
+                    "InstagramCopy": "instagram",
+                }[schema["title"]]
             ]
         )
 
@@ -132,7 +141,7 @@ def test_copy_caches_and_individual_regeneration_preserves_other_platforms(
         == 200
     )
     assert len(model.calls) == 2
-    assert len(rows(database, SocialCopy)) == 3
+    assert len(rows(database, SocialCopy)) == len(COPY)  # one draft per platform
     assert rows(database, RenderContext)[0]["context"]["clip_transcript"]
 
 

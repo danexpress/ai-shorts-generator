@@ -16,6 +16,8 @@ from .security import TokenCipher, digest
 SAFE_ERRORS = {
     "RECONNECT_REQUIRED": "This connection has expired. Reconnect the account to continue.",
     "PERMISSION_REQUIRED": "The account has not granted the required permissions. Reconnect it or check your developer app access.",
+    "PUBLIC_MEDIA_URL_REQUIRED": "This platform downloads the video from the server, which needs a public HTTPS address (BACKEND_PUBLIC_URL).",
+    "INVALID_METADATA": "The caption breaks this platform's limits (length, hashtags or mentions). Edit it and try again.",
     "QUOTA_EXCEEDED": "The platform's daily limit for this app was reached. This post continues automatically after the limit resets.",
     "PRIVATE_POSTING_ONLY": "This integration can currently publish private posts only. Check the account and visibility settings.",
     "PROVIDER_RATE_LIMITED": "The platform is busy. Try again later.",
@@ -257,7 +259,8 @@ class AccountService:
                 raise ProviderError("RECONNECT_REQUIRED")
             if not set(adapter.scopes).issubset(account.scopes):
                 raise ProviderError("PERMISSION_REQUIRED")
-            if account.token_expires_at > self.now() + 120_000:
+            ahead = getattr(adapter, "refresh_ahead_seconds", 120) * 1000
+            if account.token_expires_at > self.now() + ahead:
                 return self.cipher.decrypt(account.access_token_encrypted, user_id, platform)
             lease = db.get(SocialRefreshLease, account_id)
             if lease and lease.expires_at > self.now():

@@ -57,11 +57,24 @@ SOCIAL_ADAPTER_X=myapp.unified:UnifiedPublisher
 
 ## Developer portal configuration
 
-All flags default off. Register callbacks exactly as `BACKEND_PUBLIC_URL/v1/social-accounts/{youtube|tiktok|x}/callback`. Use HTTPS for deployed backend and frontend URLs. TikTok web OAuth requires HTTPS, including testing; use an HTTPS tunnel/domain. The optional local HTTP setting is only for YouTube/X loopback development.
+All flags default off. Register callbacks exactly as `BACKEND_PUBLIC_URL/v1/social-accounts/{youtube|tiktok|x|instagram}/callback`. Use HTTPS for deployed backend and frontend URLs. TikTok web OAuth requires HTTPS, including testing; use an HTTPS tunnel/domain. The optional local HTTP setting is only for YouTube/X loopback development.
 
 - Google Cloud: enable YouTube Data API; create a Web OAuth client and configure consent screen, privacy policy, test users and authorized redirect URI. Scopes: `https://www.googleapis.com/auth/youtube.upload`, `https://www.googleapis.com/auth/youtube.readonly`. Offline access permits refresh. API upload verification/audit and OAuth consent verification are separate. Private-only mode stays enabled unless deployment explicitly declares verification.
 - TikTok for Developers: register a web app, Login Kit and Content Posting API with `user.info.basic` and `video.publish`, and register the HTTPS redirect. Complete app review/Direct Post audit before public beta. Unreviewed clients are limited to private accounts and SELF_ONLY, with provider user/post caps. Query creator info before showing and submitting publishing settings. This must be a creator-facing product, not an internal uploader or arbitrary cross-platform copying utility.
 - X Developer Console: configure a confidential Web App with user-context OAuth 2/PKCE. Request `users.read`, `tweet.read`, `tweet.write`, `media.write`, `offline.access`. Register the callback and confirm media/post API access and billing in the portal. Do not substitute an app-only token.
+- **Meta for Developers (Instagram):** create an app of type *Business*, add the **Instagram** product, and choose **API setup with Instagram login**.
+  - Under *Business login settings*, register the HTTPS redirect `BACKEND_PUBLIC_URL/v1/social-accounts/instagram/callback`. Instagram rejects HTTP redirects even locally, so use an HTTPS tunnel or domain.
+  - Scopes: `instagram_business_basic` and `instagram_business_content_publish`.
+  - `INSTAGRAM_CLIENT_ID` is the *Instagram app ID* and `INSTAGRAM_CLIENT_SECRET` the *Instagram app secret* from that screen; they are not the Facebook app's ID and secret.
+  - Until **App Review** grants Advanced Access to both permissions (business verification is required), only Instagram accounts with a role on the app (add them as Instagram testers) can connect. The app shows a pending-review notice until you set `INSTAGRAM_PUBLISHING_APPROVED=true`.
+  - Only **Business or Creator** accounts can publish; personal accounts are refused when connecting.
+  - **Instagram downloads the video from your server.** For each post the worker hands Instagram a signed link to the render that expires after one hour and is never logged, so `BACKEND_PUBLIC_URL` must be publicly reachable over HTTPS.
+  - Publishing creates a Reels container, polls until `FINISHED`, then calls `media_publish`, the only call that creates a post. That call goes through the same "uncertain, never repeated blindly" safeguard as X.
+  - Checked before upload: MP4/MOV, H.264/HEVC + AAC, 23–60 fps, 3 s to 15 min, 300 MB maximum, at most 1,920 pixels wide; caption at most 2,200 characters, 30 hashtags and 20 @mentions.
+  - **Post limit:** 100 API posts per account per rolling 24 hours, checked before publishing. A post that would exceed it waits instead of failing.
+  - **Tokens:** long-lived tokens last 60 days and renew themselves when used in their final week, so an account unused for 60 days must reconnect.
+  - **Disconnecting:** Instagram Login has no revocation endpoint, so disconnecting or deleting the account removes the stored tokens and the creator removes the app under Instagram *Settings → Apps and websites*.
+  - References: [business login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login), [content publishing](https://developers.facebook.com/docs/instagram-platform/content-publishing), [media reference and Reels specs](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media), checked November 3, 2026 (Graph API v26.0).
 
 No developer credentials or platform approvals are present in the repository. Mock integration tests cannot prove app approval or live posting.
 

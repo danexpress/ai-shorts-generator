@@ -769,3 +769,23 @@ test('scheduling sends scheduled_at, refuses past times locally, and cancels or 
   assert.equal(JSON.stringify(calls[2]), JSON.stringify(['cancel', 'b1']));
   assert.equal(page.state.publishing.history.length, 0);  // canceled batch leaves history
 });
+
+test('Instagram Reels are composed with caption, hashtags and the feed option', async (t) => {
+  const calls = [];
+  const page = component({ ...S, createApi: () => ({
+    publishRender: async (id, body) => { calls.push(body); return { id: 'b1', render_id: 'r1', created_at: 1, jobs: [] }; },
+    getPublishBatch: async () => ({ id: 'b1', render_id: 'r1', created_at: 1, jobs: [] }),
+  }) });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session, route: 'publish', result: { id: 'r1' }, social: { accounts: [{ id: 'acc-ig', platform: 'instagram' }], platforms: [] },
+    publishing: { ...page.state.publishing, selected: { instagram: true }, copy: { instagram: { caption: 'Hire for tomorrow', hashtags: ['#hiring'] } } } });
+  page.renderId = () => 'r1';
+  assert.equal(page.state.publishing.settings.instagram.share_to_feed, true);  // default
+  page.renderVals().appProps.v.editPublishSetting('instagram', 'share_to_feed', false);
+  await page.renderVals().appProps.v.publishEverywhere();
+  const target = calls[0].targets[0];
+  assert.equal(target.platform, 'instagram');
+  assert.equal(target.social_account_id, 'acc-ig');
+  assert.equal(JSON.stringify(target.instagram), JSON.stringify({ caption: 'Hire for tomorrow', hashtags: ['#hiring'], share_to_feed: false }));
+});

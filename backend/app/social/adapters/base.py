@@ -79,6 +79,11 @@ class SocialPublisher(ABC):
     needs_creator_info = False
     # set_thumbnail() is available for an optional custom cover after publishing.
     supports_thumbnail = False
+    # publish() receives media_url: a short-lived public HTTPS link to the video, for
+    # platforms that download it themselves instead of accepting an upload.
+    needs_media_url = False
+    # Refresh access tokens this long before they expire (seconds).
+    refresh_ahead_seconds = 120
 
     def __init__(self, settings, http, platform: str | None = None):
         # `platform` lets one adapter class serve several platforms.
@@ -118,7 +123,7 @@ class SocialPublisher(ABC):
     def validate(self, video, metadata, creator=None): ...
 
     @abstractmethod
-    def publish(self, token, video: Path, info, metadata, checkpoint): ...
+    def publish(self, token, video: Path, info, metadata, checkpoint, media_url=None): ...
 
     @abstractmethod
     def get_status(self, token, checkpoint): ...

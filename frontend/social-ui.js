@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   const h = (...args) => root.React.createElement(...args);
-  const names = { youtube: "YouTube", tiktok: "TikTok", x: "X" };
+  const names = { youtube: "YouTube", tiktok: "TikTok", x: "X", instagram: "Instagram" };
   function SocialAccounts({ v }) {
     const s = v.social || {};
     return h(
@@ -243,6 +243,31 @@
       ),
     );
   }
+  function instagramFields(v) {
+    const settings = v.publishing.settings?.instagram || {};
+    return h(
+      root.React.Fragment,
+      null,
+      field(v, "instagram", "caption", "Instagram caption", true, 2200),
+      field(v, "instagram", "hashtags", "Instagram hashtags"),
+      h(
+        "label",
+        { className: "check" },
+        h("input", {
+          type: "checkbox",
+          checked: settings.share_to_feed !== false,
+          disabled: v.publishing.busy,
+          onChange: (e) => v.editPublishSetting("instagram", "share_to_feed", e.target.checked),
+        }),
+        "Also show this Reel in your profile feed",
+      ),
+      h(
+        "p",
+        { className: "small muted" },
+        "Business or Creator accounts only. Up to 30 hashtags and 20 @mentions.",
+      ),
+    );
+  }
   function field(v, p, key, label, multiline = false, limit = null) {
     const c = v.publishing.copy[p] || {};
     const value = key === "hashtags" ? (c[key] || []).join(" ") : c[key] || "";
@@ -330,6 +355,7 @@
             tiktok.consent &&
             !(tiktok.brand_content && tiktok.privacy === "SELF_ONLY")
           );
+        if (p === "instagram") return c.caption?.trim();
         return c.text?.trim();
       });
     return h(
@@ -505,7 +531,7 @@
                       { className: "small muted" },
                       "AI copy generation is not enabled yet. You can write platform-specific copy below.",
                     ),
-                  ["youtube", "tiktok", "x"]
+                  Object.keys(names)
                     .filter(
                       (p) =>
                         state.selected[p] &&
@@ -778,7 +804,9 @@
                                   ),
                                 ),
                               )
-                            : field(v, p, "text", "X post", true, 280),
+                            : p === "instagram"
+                              ? instagramFields(v)
+                              : field(v, p, "text", "X post", true, 280),
                       ),
                     ),
                   h(

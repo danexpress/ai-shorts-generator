@@ -120,7 +120,7 @@ class TikTokPublisher(SocialPublisher):
         ):
             raise ProviderError("PROVIDER_REJECTED")
 
-    def publish(self, token, video, info, metadata, checkpoint):
+    def publish(self, token, video, info, metadata, checkpoint, media_url=None):
         cp = dict(checkpoint)
         if not cp.get("publish_id"):
             # Re-query creator restrictions immediately before initializing the post.

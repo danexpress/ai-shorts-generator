@@ -66,7 +66,7 @@ class XPublisher(SocialPublisher):
         ):
             raise ProviderError("MEDIA_REJECTED")
 
-    def publish(self, token, video, info, metadata, checkpoint):
+    def publish(self, token, video, info, metadata, checkpoint, media_url=None):
         cp = dict(checkpoint)
         if not cp.get("media_id"):
             data = self.call(

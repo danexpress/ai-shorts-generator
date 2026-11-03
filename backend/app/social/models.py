@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel
 
-SocialPlatform = Literal["youtube", "tiktok", "x"]
+SocialPlatform = Literal["youtube", "tiktok", "x", "instagram"]
 
 
 class SocialAccountView(BaseModel):
@@ -95,6 +95,26 @@ class XCopy(SocialInput):
         return value
 
 
+class InstagramCopy(SocialInput):
+    caption: str = Field(min_length=1, max_length=2200)
+    hashtags: list[str] = Field(max_length=30)
+
+    @model_validator(mode="after")
+    def limits(self):
+        import re
+
+        text = self.caption + ("\n\n" + " ".join(self.hashtags) if self.hashtags else "")
+        if len(text) > 2200:
+            raise ValueError("Instagram caption and hashtags are too long")
+        if len(re.findall(r"(?<!\w)@\w+", text)) > 20:
+            raise ValueError("Instagram allows at most 20 mentions")
+        return self
+
+
+# Copy model per platform; everything platform-keyed below derives from this.
+COPY_MODELS = {"youtube": YouTubeCopy, "tiktok": TikTokCopy, "x": XCopy, "instagram": InstagramCopy}
+
+
 class HashtagRules:
     @staticmethod
     def validate(content):
@@ -114,10 +134,13 @@ class SocialCopyBundle(SocialInput):
     youtube: YouTubeCopy
     tiktok: TikTokCopy
     x: XCopy
+    instagram: InstagramCopy
 
 
 class SocialCopyView(BaseModel):
-    content: dict[SocialPlatform, YouTubeCopy | TikTokCopy | XCopy] = Field(alias="copy")
+    content: dict[SocialPlatform, YouTubeCopy | TikTokCopy | XCopy | InstagramCopy] = Field(
+        alias="copy"
+    )
     updated_at: int | None = None
     source_transcript: str | None = None
     transcript_verified: bool = False
@@ -126,7 +149,7 @@ class SocialCopyView(BaseModel):
 class SocialGenerateRequest(SocialInput):
     transcript_confirmed: bool = False
     platforms: list[SocialPlatform] = Field(
-        default_factory=lambda: ["youtube", "tiktok", "x"], min_length=1, max_length=3
+        default_factory=lambda: list(COPY_MODELS), min_length=1, max_length=len(COPY_MODELS)
     )
 
     @field_validator("platforms")
@@ -163,17 +186,22 @@ class TikTokPost(TikTokCopy):
         return self
 
 
+class InstagramPost(InstagramCopy):
+    share_to_feed: bool = True  # also show the reel in the profile feed, not only Reels
+
+
 class SocialPublishTarget(SocialInput):
     platform: SocialPlatform
     social_account_id: str = Field(min_length=1, max_length=40)
     youtube: YouTubePost | None = None
     tiktok: TikTokPost | None = None
     x: XCopy | None = None
+    instagram: InstagramPost | None = None
 
     @model_validator(mode="after")
     def selected_metadata(self):
         if getattr(self, self.platform) is None or any(
-            getattr(self, p) is not None for p in ["youtube", "tiktok", "x"] if p != self.platform
+            getattr(self, p) is not None for p in COPY_MODELS if p != self.platform
         ):
             raise ValueError("Provide only the selected platform metadata")
         HashtagRules.validate(getattr(self, self.platform).model_dump())
@@ -181,7 +209,7 @@ class SocialPublishTarget(SocialInput):
 
 
 class SocialPublishRequest(SocialInput):
-    targets: list[SocialPublishTarget] = Field(min_length=1, max_length=3)
+    targets: list[SocialPublishTarget] = Field(min_length=1, max_length=len(COPY_MODELS))
     approved: bool
     # Publish later instead of now: an ISO 8601 time with a timezone offset.
     scheduled_at: AwareDatetime | None = None
@@ -242,7 +270,7 @@ class SocialCopySave(SocialInput):
     @field_validator("content")
     @classmethod
     def typed_copy(cls, content):
-        models = {"youtube": YouTubeCopy, "tiktok": TikTokCopy, "x": XCopy}
+        models = COPY_MODELS
         if not content:
             raise ValueError("Provide edited copy")
         return {

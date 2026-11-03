@@ -894,7 +894,7 @@
       }),
     };
 
-    api.listSocialAccounts = () => op(() => { requireUser(); return {accounts: [], platforms: ['youtube','tiktok','x'].map(platform => ({platform, enabled: false, notice: 'Social publishing needs a configured backend.', private_only: false})), copy_available: false}; });
+    api.listSocialAccounts = () => op(() => { requireUser(); return {accounts: [], platforms: ['youtube','tiktok','x','instagram'].map(platform => ({platform, enabled: false, notice: 'Social publishing needs a configured backend.', private_only: false})), copy_available: false}; });
     api.connectSocialAccount = api.disconnectSocialAccount = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
 
     // Captions are derived by the backend from real word timings; the mock only lists styles.

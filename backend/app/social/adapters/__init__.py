@@ -16,6 +16,7 @@ BUILTIN = {
     "youtube": "app.social.adapters.youtube:YouTubePublisher",
     "tiktok": "app.social.adapters.tiktok:TikTokPublisher",
     "x": "app.social.adapters.x:XPublisher",
+    "instagram": "app.social.adapters.instagram:InstagramPublisher",
 }
 
 

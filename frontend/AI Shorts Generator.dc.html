@@ -29,6 +29,8 @@ const fmt = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(
 const fmtDate = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const rel = (t) => { const h = (t - Date.now()) / 3600e3; return h < 48 ? Math.max(1, Math.round(h)) + 'h' : Math.round(h / 24) + ' days'; };
 const parseAvoid = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+// Social platforms in display order (matches the backend's PLATFORMS).
+const PLATFORMS = ['youtube', 'tiktok', 'x', 'instagram'];
 const idem = () => 'idem_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 class Component extends DCLogic {
@@ -41,7 +43,7 @@ class Component extends DCLogic {
     transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
     renderedClips: [], renderingId: null, resolution: 1080, result: null, renderError: null,
     captions: { clipId: null, track: null, draft: null, loading: false, error: null, saving: false, dirty: false, confirmReset: false, texts: {} }, captionPresets: [], burnCaptions: true, framing: 'crop', captionFiles: {},
-    publishing: {loading:false, busy:false, error:null, copy:{}, selected:{}, settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}}, history:[], batch:null, creator:null, creatorError:null},
+    publishing: {loading:false, busy:false, error:null, copy:{}, selected:{}, settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false},instagram:{share_to_feed:true}}, history:[], batch:null, creator:null, creatorError:null},
     social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
     theme: 'system', dashboardLoading: false, dashboardError: null, clipsError: null,
     transcriptError: null, savingTranscript: false, usageLoading: false, usageError: null, usageEntries: [],
@@ -154,7 +156,7 @@ class Component extends DCLogic {
     this.stopPolling();
     this.releasePreviewUrls();
     this.setState({ route: 'login', bootError: null, me: null, loginPassword: '', loginError: message,
-      publishing: {loading:false,busy:false,error:null,copy:{},selected:{},settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}},history:[],batch:null,creator:null,creatorError:null},
+      publishing: {loading:false,busy:false,error:null,copy:{},selected:{},settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false},instagram:{share_to_feed:true}},history:[],batch:null,creator:null,creatorError:null},
       social: { accounts: [], platforms: [], loading: false, error: null, busy: false },
       projects: [], projectId: null, project: null, status: null, uploading: false, uploadPct: 0,
       transcript: null, drafts: {}, clipsRes: null, selected: {}, previewId: null,
@@ -268,7 +270,7 @@ class Component extends DCLogic {
   }
   async loadPublish(result, keepCopy = false) {
     const id = this.renderId(result), version = this.publishVersion = (this.publishVersion || 0) + 1;
-    this.setState(s => ({publishing:{...s.publishing,loading:true,error:null,...(!keepCopy?{copy:{},selected:{},batch:null,history:[],creator:null,creatorError:null,settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false}}}:{})}}));
+    this.setState(s => ({publishing:{...s.publishing,loading:true,error:null,...(!keepCopy?{copy:{},selected:{},batch:null,history:[],creator:null,creatorError:null,settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false},instagram:{share_to_feed:true}}}:{})}}));
     try {
       const [accounts, copy, history] = await Promise.all([this.api.listSocialAccounts(),this.api.getSocialCopy(id),this.api.getPublishingHistory(id)]);
       if (version !== this.publishVersion || !this.state.me || this.disposed) return;
@@ -299,16 +301,16 @@ class Component extends DCLogic {
     const id=this.renderId(), version=this.publishVersion;
     this.setState(s=>({publishing:{...s.publishing,busy:true,error:null}}));
     try {
-      const result=await this.api[regenerate?'regenerateSocialCopy':'generateSocialCopy'](id,{platforms:platform?[platform]:['youtube','tiktok','x'],transcript_confirmed:!!this.state.publishing.transcriptConfirmed});
+      const result=await this.api[regenerate?'regenerateSocialCopy':'generateSocialCopy'](id,{platforms:platform?[platform]:PLATFORMS,transcript_confirmed:!!this.state.publishing.transcriptConfirmed});
       if(version!==this.publishVersion||id!==this.renderId()||!this.state.me) return;
-      this.setState(s=>({publishing:{...s.publishing,copy:{...s.publishing.copy,...Object.fromEntries((platform?[platform]:['youtube','tiktok','x']).map(p=>[p,result.copy[p]]))}}})); this.publishKey=null;
+      this.setState(s=>({publishing:{...s.publishing,copy:{...s.publishing.copy,...Object.fromEntries((platform?[platform]:PLATFORMS).map(p=>[p,result.copy[p]]))}}})); this.publishKey=null;
     } catch(e) { if(version===this.publishVersion&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }
     finally { if(version===this.publishVersion) this.setState(s=>({publishing:{...s.publishing,busy:false}})); }
   }
   async saveSocialDraft(platform) {
     const id=this.renderId(), version=this.publishVersion;
     const data=this.state.publishing.copy[platform]; if(!data) return;
-    const fields=platform==='youtube'?['title','description','hashtags']:platform==='tiktok'?['caption','hashtags']:['text'];
+    const fields=platform==='youtube'?['title','description','hashtags']:platform==='tiktok'||platform==='instagram'?['caption','hashtags']:['text'];
     if(fields.some(f=>data[f]===undefined||(typeof data[f]==='string'&&!data[f].trim()))) return;
     try { await this.api.saveSocialCopy(id,{copy:{[platform]:data}}); }
     catch(e) { if(version===this.publishVersion&&this.state.me&&id===this.renderId()&&!this.handleAuth(e)) this.setState(s=>({publishing:{...s.publishing,error:e.message}})); }

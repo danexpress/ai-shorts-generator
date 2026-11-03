@@ -167,6 +167,20 @@ class PublishWorker:
             job.updated_at = self.now()
         logger.info("Publish job %s held for quota until %s", job_id, reset_ms)
 
+    def media_url(self, render_id):
+        """A one-hour signed public link to the render, for platforms that fetch it.
+
+        Built on BACKEND_PUBLIC_URL, which must be public HTTPS; never logged.
+        """
+        from ..routers.media import media_signature
+
+        base = self.accounts.settings.public_url
+        if not base.startswith("https://"):
+            raise ProviderError("PUBLIC_MEDIA_URL_REQUIRED")
+        expires = self.now() // 1000 + 3600
+        signature = media_signature(render_id, expires, self.settings.media_signing_key)
+        return f"{base}/v1/rendered/{render_id}?expires={expires}&signature={signature}"
+
     def run_once(self):
         job_id = self.claim()
         if not job_id:
@@ -212,6 +226,8 @@ class PublishWorker:
             token = self.accounts.token(
                 values["social_account_id"], values["user_id"], values["platform"]
             )
+            # The linked account's platform ID, for adapters whose endpoints need it.
+            cp.setdefault("platform_user_id", values["platform_user_id"])
             if cp.get("post_request_started"):
                 raise ProviderError("PUBLISH_UNCERTAIN")
             if values["status"] == "publishing":
@@ -242,7 +258,10 @@ class PublishWorker:
                     adapter.validate(cp["video_info"], values["post_metadata"])
                 action = "publish"
                 self.spend(adapter, action, cp)
-                step = adapter.publish(token, path, cp["video_info"], values["post_metadata"], cp)
+                link = self.media_url(values["render_id"]) if adapter.needs_media_url else None
+                step = adapter.publish(
+                    token, path, cp["video_info"], values["post_metadata"], cp, media_url=link
+                )
             if (
                 step.status == "published"
                 and adapter.supports_thumbnail

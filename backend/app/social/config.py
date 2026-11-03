@@ -4,7 +4,9 @@ import os
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-PLATFORMS = ("youtube", "tiktok", "x")
+PLATFORMS = ("youtube", "tiktok", "x", "instagram")
+# Platforms whose OAuth requires HTTPS redirects even for local development.
+HTTPS_ONLY = {"tiktok", "instagram"}
 
 
 def flag(name):
@@ -56,6 +58,8 @@ class SocialSettings:
         default_factory=lambda: int(os.getenv("YOUTUBE_DAILY_UNITS", "10000"))
     )
     tiktok_audited: bool = field(default_factory=lambda: flag("TIKTOK_PUBLISHING_AUDITED"))
+    # Meta App Review approved Advanced Access for instagram_business_content_publish.
+    instagram_approved: bool = field(default_factory=lambda: flag("INSTAGRAM_PUBLISHING_APPROVED"))
     copy_url: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_API_URL", ""))
     copy_key: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_API_KEY", ""), repr=False)
     copy_model: str = field(default_factory=lambda: os.getenv("SOCIAL_COPY_MODEL", ""))
@@ -78,7 +82,7 @@ class SocialSettings:
                 parsed.scheme == "https"
                 or (
                     self.allow_local_http
-                    and platform != "tiktok"
+                    and platform not in HTTPS_ONLY
                     and parsed.scheme == "http"
                     and parsed.hostname in {"localhost", "127.0.0.1"}
                 )
@@ -101,6 +105,8 @@ class SocialSettings:
             return "This connection is not enabled yet. Your workspace administrator needs to finish setup."
         if platform == "youtube" and not self.youtube_verified:
             return "This YouTube integration is configured for private uploads until its API project is verified."
+        if platform == "instagram" and not self.instagram_approved:
+            return "Instagram app review pending: only accounts with a role on the Meta app can connect and post."
         if platform == "tiktok" and not self.tiktok_audited:
             return "TikTok audit pending: only private accounts and Only me posts are supported."
         return None

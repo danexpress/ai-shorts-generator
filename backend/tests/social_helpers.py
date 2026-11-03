@@ -102,6 +102,8 @@ class FakePublisher(FakeAccountAdapter):
         # The same interface hooks the real adapters declare for these platforms.
         self.needs_creator_info = platform == "tiktok"
         self.supports_thumbnail = platform == "youtube"
+        self.needs_media_url = platform == "instagram"
+        self.refresh_ahead_seconds = 120
 
     def upload_complete(self, checkpoint):
         return False
@@ -130,7 +132,8 @@ class FakePublisher(FakeAccountAdapter):
         if self.reject:
             raise ProviderError("MEDIA_REJECTED")
 
-    def publish(self, token, path, info, metadata, cp):
+    def publish(self, token, path, info, metadata, cp, media_url=None):
+        self.media_urls = [*getattr(self, "media_urls", []), media_url]
         self.calls[self.platform] += 1
         if self.failures:
             raise self.failures.pop(0)
@@ -149,7 +152,7 @@ class FakePublisher(FakeAccountAdapter):
 def publishing(app, social, settings, clock, monkeypatch):
     accounts = social[0]
     calls = Counter()
-    adapters = {p: FakePublisher(p, calls) for p in ["youtube", "tiktok", "x"]}
+    adapters = {p: FakePublisher(p, calls) for p in PLATFORMS}
     accounts.adapters = adapters
     app.state.social_publishing.accounts = accounts
     monkeypatch.setattr("app.social.publishing.inspect_video", lambda *args: INFO)
