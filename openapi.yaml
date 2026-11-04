@@ -1855,6 +1855,152 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/story-voices:
+    get:
+      tags:
+      - Story
+      summary: Voices
+      operationId: listStoryVoices
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryVoices'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/stories/{id}/voice:
+    post:
+      tags:
+      - Story
+      summary: Request Voice
+      description: Queue voice generation; poll GET /v1/stories/{id} until status is "voiced".
+      operationId: requestStoryVoice
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoryVoiceRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/stories/{id}/voice/playback:
+    post:
+      tags:
+      - Story
+      summary: Voice Playback
+      operationId: getStoryVoicePlayback
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackLink'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/story-audio/{story_id}:
+    get:
+      tags:
+      - Story
+      summary: Stream Voice
+      operationId: streamStoryAudio
+      parameters:
+      - name: story_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Story Id
+      - name: expires
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Expires
+      - name: signature
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Signature
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security: []
 components:
   securitySchemes:
     bearerAuth:
@@ -3834,6 +3980,9 @@ components:
           type: string
           enum:
           - draft
+          - voicing
+          - voiced
+          - voice_failed
           title: Status
         revision:
           type: integer
@@ -3882,6 +4031,11 @@ components:
             type: string
           type: array
           title: Warnings
+        voice:
+          $ref: '#/components/schemas/StoryVoice'
+          nullable: true
+        voiceJob:
+          $ref: '#/components/schemas/StoryVoiceJob'
       type: object
       required:
       - id
@@ -3900,6 +4054,8 @@ components:
       - wordCount
       - wordBudget
       - warnings
+      - voice
+      - voiceJob
       title: Story
     StoryCreateRequest:
       properties:
@@ -3975,6 +4131,19 @@ components:
       - genres
       - lengths
       title: StoryGenres
+    StoryJobError:
+      properties:
+        code:
+          type: string
+          title: Code
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - code
+      - message
+      title: StoryJobError
     StoryList:
       properties:
         stories:
@@ -3986,6 +4155,21 @@ components:
       required:
       - stories
       title: StoryList
+    StoryLoudness:
+      properties:
+        inputLufs:
+          title: Inputlufs
+          type: number
+          nullable: true
+        outputLufs:
+          title: Outputlufs
+          type: number
+          nullable: true
+      type: object
+      required:
+      - inputLufs
+      - outputLufs
+      title: StoryLoudness
     StoryRegenerateRequest:
       properties:
         revision:
@@ -4024,6 +4208,23 @@ components:
       - visual_description
       - mood
       title: StoryScene
+    StorySceneTiming:
+      properties:
+        id:
+          type: integer
+          title: Id
+        start:
+          type: number
+          title: Start
+        end:
+          type: number
+          title: End
+      type: object
+      required:
+      - id
+      - start
+      - end
+      title: StorySceneTiming
     StoryScript:
       properties:
         title:
@@ -4075,6 +4276,9 @@ components:
           type: string
           enum:
           - draft
+          - voicing
+          - voiced
+          - voice_failed
           title: Status
         genre:
           type: string
@@ -4102,6 +4306,221 @@ components:
       - createdAt
       - updatedAt
       title: StorySummary
+    StoryVoice:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        voice:
+          type: string
+          title: Voice
+        speed:
+          type: number
+          title: Speed
+        durationSec:
+          type: number
+          title: Durationsec
+        tooLong:
+          type: boolean
+          title: Toolong
+        scenes:
+          items:
+            $ref: '#/components/schemas/StorySceneTiming'
+          type: array
+          title: Scenes
+        words:
+          items:
+            $ref: '#/components/schemas/StoryWord'
+          type: array
+          title: Words
+        timingSources:
+          items:
+            type: string
+          type: array
+          title: Timingsources
+        characters:
+          type: integer
+          title: Characters
+        costUsd:
+          type: number
+          title: Costusd
+        cachedScenes:
+          type: integer
+          title: Cachedscenes
+        loudness:
+          $ref: '#/components/schemas/StoryLoudness'
+        stale:
+          type: boolean
+          title: Stale
+      type: object
+      required:
+      - provider
+      - voice
+      - speed
+      - durationSec
+      - tooLong
+      - scenes
+      - words
+      - timingSources
+      - characters
+      - costUsd
+      - cachedScenes
+      - loudness
+      - stale
+      title: StoryVoice
+    StoryVoiceJob:
+      properties:
+        request:
+          $ref: '#/components/schemas/StoryVoiceSettings'
+          nullable: true
+        progress:
+          title: Progress
+          type: number
+          nullable: true
+        error:
+          $ref: '#/components/schemas/StoryJobError'
+          nullable: true
+      type: object
+      required:
+      - request
+      - progress
+      - error
+      title: StoryVoiceJob
+    StoryVoiceOption:
+      properties:
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - id
+      - label
+      - description
+      title: StoryVoiceOption
+    StoryVoiceProvider:
+      properties:
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+        available:
+          type: boolean
+          title: Available
+        reason:
+          title: Reason
+          type: string
+          nullable: true
+        speedRange:
+          items:
+            type: number
+          type: array
+          title: Speedrange
+        defaultSpeed:
+          type: number
+          title: Defaultspeed
+        voices:
+          items:
+            $ref: '#/components/schemas/StoryVoiceOption'
+          type: array
+          title: Voices
+      type: object
+      required:
+      - id
+      - label
+      - available
+      - reason
+      - speedRange
+      - defaultSpeed
+      - voices
+      title: StoryVoiceProvider
+    StoryVoiceRequest:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        provider:
+          type: string
+          maxLength: 40
+          title: Provider
+        voice:
+          type: string
+          maxLength: 100
+          title: Voice
+        speed:
+          title: Speed
+          type: number
+          maximum: 2.0
+          minimum: 0.5
+          nullable: true
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      - provider
+      - voice
+      title: StoryVoiceRequest
+    StoryVoiceSettings:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        voice:
+          type: string
+          title: Voice
+        speed:
+          type: number
+          title: Speed
+      type: object
+      required:
+      - provider
+      - voice
+      - speed
+      title: StoryVoiceSettings
+    StoryVoices:
+      properties:
+        defaultProvider:
+          title: Defaultprovider
+          type: string
+          nullable: true
+        providers:
+          items:
+            $ref: '#/components/schemas/StoryVoiceProvider'
+          type: array
+          title: Providers
+      type: object
+      required:
+      - defaultProvider
+      - providers
+      title: StoryVoices
+    StoryWord:
+      properties:
+        text:
+          type: string
+          title: Text
+        start:
+          type: number
+          title: Start
+        end:
+          type: number
+          title: End
+        scene:
+          type: integer
+          title: Scene
+      type: object
+      required:
+      - text
+      - start
+      - end
+      - scene
+      title: StoryWord
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

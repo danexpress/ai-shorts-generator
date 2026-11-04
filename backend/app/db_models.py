@@ -191,7 +191,7 @@ class TranscriptRecord(Base):
 
 class StoryRecord(Base):
     """A Story Mode project. `document` is the editable project file: request, script,
-    and (in later steps) voice, scene timings, background, music and style."""
+    voice and scene timings, and (in later steps) background, music and style."""
 
     __tablename__ = "story_projects"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
@@ -202,6 +202,11 @@ class StoryRecord(Base):
     document: Mapped[dict] = mapped_column(JSON)
     createdAt: Mapped[int] = mapped_column("created_at", BigInteger, index=True)
     updatedAt: Mapped[int] = mapped_column("updated_at", BigInteger)
+    # Background voice generation (status "voicing"): processing-worker lease and progress.
+    leaseOwner: Mapped[str | None] = mapped_column("lease_owner", String(40))
+    leaseUntil: Mapped[int | None] = mapped_column("lease_until", BigInteger)
+    attempts: Mapped[int | None] = mapped_column(Integer)
+    progress: Mapped[float | None] = mapped_column(Float)
 
 
 class AnalysisRunRecord(Base):

@@ -1,8 +1,11 @@
-"""Story Mode: write and edit narration scripts (voice and render follow)."""
+"""Story Mode: write and edit narration scripts, then generate the voiceover."""
+
+import hmac
 
 from fastapi import APIRouter, Request
 
-from ..models import Ok
+from ..errors import ApiError
+from ..models import Ok, PlaybackLink
 from ..social.security import SocialUser
 from ..story.models import (
     Story,
@@ -11,8 +14,11 @@ from ..story.models import (
     StoryList,
     StoryRegenerateRequest,
     StoryScriptUpdate,
+    StoryVoiceRequest,
+    StoryVoices,
 )
 from ..story.script import LENGTHS
+from .media import media_signature, stream_file
 
 router = APIRouter(prefix="/v1", tags=["Story"])
 
@@ -57,3 +63,32 @@ def regenerate(id: str, body: StoryRegenerateRequest, request: Request, user: So
 def delete(id: str, request: Request, user: SocialUser):
     service(request).delete(user, id)
     return {"ok": True}
+
+
+@router.get("/story-voices", response_model=StoryVoices, operation_id="listStoryVoices")
+def voices(request: Request, user: SocialUser):
+    return service(request).voices()
+
+
+@router.post("/stories/{id}/voice", response_model=Story, operation_id="requestStoryVoice")
+def request_voice(id: str, body: StoryVoiceRequest, request: Request, user: SocialUser):
+    """Queue voice generation; poll GET /v1/stories/{id} until status is "voiced"."""
+    return service(request).request_voice(user, id, body.model_dump())
+
+
+@router.post(
+    "/stories/{id}/voice/playback",
+    response_model=PlaybackLink,
+    operation_id="getStoryVoicePlayback",
+)
+def voice_playback(id: str, request: Request, user: SocialUser):
+    return service(request).playback(user, id)
+
+
+@router.get("/story-audio/{story_id}", operation_id="streamStoryAudio")
+def stream_voice(story_id: str, request: Request, expires: int, signature: str):
+    settings = request.app.state.settings
+    expected = media_signature(f"story:{story_id}", expires, settings.media_signing_key)
+    if expires <= int(request.app.state.clock()) or not hmac.compare_digest(signature, expected):
+        raise ApiError("UNAUTHENTICATED", "This playback link is invalid or expired.", 401)
+    return stream_file(request, service(request).voice_file(story_id), "audio/wav")

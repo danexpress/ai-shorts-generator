@@ -8,6 +8,7 @@ from ..models import RequestModel
 from .genres import GENRES
 
 TargetSeconds = Literal[30, 45, 60]
+StoryStatus = Literal["draft", "voicing", "voiced", "voice_failed"]
 
 
 class StoryCreateRequest(RequestModel):
@@ -54,6 +55,86 @@ class StoryRegenerateRequest(RequestModel):
     shorten: bool = False
 
 
+class StoryVoiceRequest(RequestModel):
+    revision: int
+    provider: str = Field(max_length=40)
+    voice: str = Field(max_length=100)
+    # Omitted: the provider's default speed.
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
+
+
+class StoryVoiceOption(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class StoryVoiceProvider(BaseModel):
+    id: str
+    label: str
+    available: bool
+    reason: str | None
+    speedRange: list[float]
+    defaultSpeed: float
+    voices: list[StoryVoiceOption]
+
+
+class StoryVoices(BaseModel):
+    defaultProvider: str | None
+    providers: list[StoryVoiceProvider]
+
+
+class StorySceneTiming(BaseModel):
+    id: int
+    start: float
+    end: float
+
+
+class StoryWord(BaseModel):
+    text: str
+    start: float
+    end: float
+    scene: int
+
+
+class StoryLoudness(BaseModel):
+    inputLufs: float | None
+    outputLufs: float | None
+
+
+class StoryVoice(BaseModel):
+    provider: str
+    voice: str
+    speed: float
+    durationSec: float
+    tooLong: bool
+    scenes: list[StorySceneTiming]
+    words: list[StoryWord]
+    timingSources: list[str]
+    characters: int
+    costUsd: float
+    cachedScenes: int
+    loudness: StoryLoudness
+    stale: bool
+
+
+class StoryVoiceSettings(BaseModel):
+    provider: str
+    voice: str
+    speed: float
+
+
+class StoryJobError(BaseModel):
+    code: str
+    message: str
+
+
+class StoryVoiceJob(BaseModel):
+    request: StoryVoiceSettings | None
+    progress: float | None
+    error: StoryJobError | None
+
+
 class StoryGenre(BaseModel):
     id: str
     label: str
@@ -69,7 +150,7 @@ class StoryGenres(BaseModel):
 class Story(BaseModel):
     id: str
     title: str
-    status: Literal["draft"]
+    status: StoryStatus
     revision: int
     createdAt: int
     updatedAt: int
@@ -83,12 +164,14 @@ class Story(BaseModel):
     wordCount: int
     wordBudget: list[int]
     warnings: list[str]
+    voice: StoryVoice | None
+    voiceJob: StoryVoiceJob
 
 
 class StorySummary(BaseModel):
     id: str
     title: str
-    status: Literal["draft"]
+    status: StoryStatus
     genre: str
     targetSeconds: int
     estimatedSeconds: int

@@ -44,3 +44,8 @@ def save(media_dir: Path, kind: str, key, value: dict):
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False), "utf-8")
     temporary.replace(path)
+
+
+def file_path(media_dir: Path, kind: str, key, suffix: str) -> Path:
+    """A content-addressed binary entry (e.g. scene audio) next to its JSON metadata."""
+    return cache_root(media_dir) / kind / f"{digest(key)}{suffix}"

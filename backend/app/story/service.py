@@ -1,4 +1,5 @@
-"""Story projects: create from a topic or pasted story, edit and regenerate the script.
+"""Story projects: create from a topic or pasted story, edit and regenerate the script,
+and request the voiceover (generated in the background by app/story/worker.py).
 
 LLM calls run outside database transactions. Generated scripts are cached by content
 hash (see cache.py), so asking again for the same script costs nothing.
@@ -18,6 +19,7 @@ from . import cache
 from .genres import GENRES
 from .prompt import PROMPT_VERSION
 from .script import (
+    MAX_SECONDS,
     ScriptFailed,
     ScriptRequest,
     cache_key,
@@ -28,21 +30,50 @@ from .script import (
     timing_notes,
     word_budget,
 )
+from .tts import build_providers
+from .worker import remove_story_files, story_dir
 
 logger = logging.getLogger(__name__)
 
 DOCUMENT_VERSION = 1
-RATE_LIMIT = 6  # script generations per creator per minute
+RATE_LIMIT = 6  # script generations (and voice requests) per creator per minute
+PLAYBACK_SECONDS = 30 * 60
 
 
 def request_of(document: dict) -> ScriptRequest:
     return ScriptRequest(**document["request"])
 
 
+def script_digest(script: dict) -> str:
+    """What the voice depends on: the spoken text of each scene, in order."""
+    return cache.digest([s["narration"] for s in script["scenes"]])
+
+
+def voice_view(document: dict) -> dict | None:
+    voice = document.get("voice")
+    if not voice:
+        return None
+    keys = ("provider", "voice", "speed", "durationSec", "tooLong", "scenes", "words")
+    keys += ("timingSources", "characters", "costUsd", "cachedScenes", "loudness")
+    return {
+        **{key: voice[key] for key in keys},
+        # The script changed after this voice was generated: it no longer matches.
+        "stale": voice["scriptDigest"] != script_digest(document["script"]),
+    }
+
+
 def view(record: StoryRecord) -> dict:
     document = record.document
     request, script = request_of(document), document["script"]
     low, high = word_budget(request.seconds)
+    voice = voice_view(document)
+    warnings = timing_notes(script, request)
+    if voice and voice["tooLong"] and not voice["stale"]:
+        warnings.append(
+            f"The voiceover runs {voice['durationSec']:.0f} seconds; Shorts must stay under "
+            f"{MAX_SECONDS}. Shorten the script, then generate the voice again."
+        )
+    pending = document.get("voiceRequest") if record.status == "voicing" else None
     return {
         "id": record.id,
         "title": record.title,
@@ -59,7 +90,15 @@ def view(record: StoryRecord) -> dict:
         "scriptSource": document["scriptSource"],
         "wordCount": sum(count_words(s["narration"]) for s in script["scenes"]),
         "wordBudget": [low, high],
-        "warnings": timing_notes(script, request),
+        "warnings": warnings,
+        "voice": voice,
+        "voiceJob": {
+            "request": (
+                {key: pending[key] for key in ("provider", "voice", "speed")} if pending else None
+            ),
+            "progress": record.progress if pending else None,
+            "error": document.get("voiceError") if record.status == "voice_failed" else None,
+        },
     }
 
 
@@ -78,9 +117,10 @@ def summary(record: StoryRecord) -> dict:
 
 
 class StoryService:
-    def __init__(self, database, settings, clock, model_factory=None):
+    def __init__(self, database, settings, clock, model_factory=None, providers=None):
         self.database, self.settings, self.clock = database, settings, clock
         self.model_factory = model_factory or self.claude
+        self.providers = providers if providers is not None else build_providers(settings)
 
     def claude(self):
         return ClaudeModel(
@@ -223,10 +263,17 @@ class StoryService:
                 409,
             )
 
+    def check_idle(self, record: StoryRecord):
+        if record.status == "voicing":
+            raise ApiError(
+                "STORY_BUSY", "The voice is being generated. Wait for it to finish.", 409
+            )
+
     def save_script(self, user_id, story_id, revision, script, source, extra=None) -> dict:
         with self.database.transaction() as db:
             record = self.owned(db, user_id, story_id)
             self.check_revision(record, revision)
+            self.check_idle(record)
             document = {**record.document, "script": script, "scriptSource": source}
             if extra:
                 document.update(extra)
@@ -253,6 +300,7 @@ class StoryService:
         with self.database.sessions() as db:
             record = self.owned(db, user_id, story_id)
             self.check_revision(record, revision)
+            self.check_idle(record)
             document = record.document
         request = request_of(document)
         self.limit(user_id)
@@ -280,3 +328,84 @@ class StoryService:
     def delete(self, user_id: str, story_id: str):
         with self.database.transaction() as db:
             db.delete(self.owned(db, user_id, story_id))
+        remove_story_files(self.settings.media_dir, story_id)
+
+    # ---------- voiceover ----------
+
+    def voices(self) -> dict:
+        default = self.settings.story_tts_provider
+        return {
+            "defaultProvider": default if default in self.providers else None,
+            "providers": [provider.public() for provider in self.providers.values()],
+        }
+
+    def request_voice(self, user_id: str, story_id: str, body: dict) -> dict:
+        """Queue voice generation; the processing worker picks it up (status "voicing")."""
+        provider = self.providers.get(body["provider"])
+        if provider is None:
+            raise ApiError("INVALID_INPUT", "Choose one of the available voice providers.", 422)
+        reason = provider.unavailable_reason()
+        if reason:
+            raise ApiError("VOICE_UNAVAILABLE", reason, 409)
+        if body["voice"] not in {voice.id for voice in provider.voices()}:
+            raise ApiError("INVALID_INPUT", f"Choose one of the {provider.label} voices.", 422)
+        low, high = provider.speed_range
+        speed = provider.default_speed if body.get("speed") is None else body["speed"]
+        if not low <= speed <= high:
+            raise ApiError(
+                "INVALID_INPUT",
+                f"Choose a speed between {low:g}x and {high:g}x for this voice.",
+                422,
+            )
+        self.limit(user_id)
+        with self.database.transaction() as db:
+            record = self.owned(db, user_id, story_id)
+            self.check_revision(record, body["revision"])
+            self.check_idle(record)
+            record.document = {
+                **record.document,
+                "voiceRequest": {
+                    "id": oid("vrq"),
+                    "provider": provider.id,
+                    "voice": body["voice"],
+                    "speed": round(speed, 2),
+                    "scriptDigest": script_digest(record.document["script"]),
+                    "requestedAt": self.now(),
+                },
+                "voiceError": None,
+            }
+            record.update(
+                status="voicing",
+                attempts=0,
+                progress=0.0,
+                leaseOwner=None,
+                leaseUntil=None,
+                revision=record.revision + 1,
+                updatedAt=self.now(),
+            )
+            db.flush()
+            return view(record)
+
+    def playback(self, user_id: str, story_id: str) -> dict:
+        from ..routers.media import media_signature
+
+        with self.database.sessions() as db:
+            voice = self.owned(db, user_id, story_id).document.get("voice")
+        if not voice:
+            raise ApiError("NOT_FOUND", "This story has no voiceover yet.", 404)
+        expires = int(self.clock()) + PLAYBACK_SECONDS
+        signature = media_signature(f"story:{story_id}", expires, self.settings.media_signing_key)
+        return {
+            "url": f"/v1/story-audio/{story_id}?expires={expires}&signature={signature}",
+            "expiresAt": expires * 1000,
+        }
+
+    def voice_file(self, story_id: str):
+        """The current voiceover file, for a request that already passed the signature."""
+        with self.database.sessions() as db:
+            record = db.get(StoryRecord, story_id)
+            voice = record.document.get("voice") if record else None
+        path = story_dir(self.settings.media_dir, story_id) / voice["file"] if voice else None
+        if not path or not path.is_file():
+            raise ApiError("NOT_FOUND", "Voiceover not found.", 404)
+        return path

@@ -26,6 +26,7 @@ from ..highlights import (
 )
 from ..renderer import RendererUnavailable, ffmpeg_path
 from ..store import Store, oid
+from ..story.worker import StoryWorker
 from ..transcription import (
     TranscriptionError,
     build_transcriber,
@@ -269,15 +270,20 @@ class ProcessingWorker:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     settings = Settings()
-    if settings.processing_mode == "demo":
-        logger.info("PROCESSING_MODE=demo: the API simulates processing; worker not needed")
-        return
     database = Database(settings.database_url)
     database.initialize()
-    worker = ProcessingWorker(database, settings)
-    logger.info("Transcription: %s", worker.transcriber.key)
-    if settings.highlight_model != "demo" and not (
-        os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    stories = StoryWorker(database, settings)
+    if settings.processing_mode == "demo":
+        # The API simulates video processing; only Story Mode voices run here.
+        logger.info("PROCESSING_MODE=demo: video processing is simulated by the API")
+        worker = None
+    else:
+        worker = ProcessingWorker(database, settings)
+        logger.info("Transcription: %s", worker.transcriber.key)
+    if (
+        worker
+        and settings.highlight_model != "demo"
+        and not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
     ):
         logger.warning(
             "No ANTHROPIC_API_KEY set: highlight detection will fail unless an `ant auth login` "
@@ -291,10 +297,15 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    logger.info("Processing worker started (Whisper %s)", settings.whisper_model)
+    logger.info(
+        "Processing worker started (Whisper %s, Story voice %s)",
+        settings.whisper_model,
+        settings.story_tts_provider,
+    )
     try:
         while running:
-            if not worker.run_once():
+            # Video jobs first; a story voice runs whenever no video job is waiting.
+            if not ((worker and worker.run_once()) or stories.run_once()):
                 time.sleep(1)
     finally:
         database.dispose()

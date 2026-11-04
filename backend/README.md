@@ -139,7 +139,7 @@ Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (defau
 
 ## Story Mode
 
-Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle") or a pasted story into a narrated Short. **Step 1, the script, is implemented.** The voiceover, background, captions, music and render steps are coming next.
+Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle") or a pasted story into a narrated Short. **The script and the voiceover are implemented.** The background, captions, music and render steps are coming next.
 
 1. **Request** (`POST /v1/stories`): either a topic (3–300 characters) or a pasted story (40–6,000 characters), plus a genre, a target length of 30, 45 or 60 seconds, and an optional tone (each genre has a default tone).
 2. **Prompt** (`app/story/prompt.py`): the rules are:
@@ -172,6 +172,61 @@ Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle")
 
 Settings: `STORY_MODEL` (default `claude-opus-5-5`; `demo` writes a canned script offline), `STORY_EFFORT` (default `medium`) and `STORY_FALLBACKS`. They use the same Claude credentials and shared client (`app/llm.py`) as highlight detection.
 
+### Voiceover
+
+`POST /v1/stories/{id}/voice` with `{revision, provider, voice, speed}` queues the voice; the processing worker started by `make run` generates it in the background (it also runs with `PROCESSING_MODE=demo`). Poll `GET /v1/stories/{id}`: the status goes `voicing` → `voiced` (or `voice_failed`, with a readable `voiceJob.error`), and `voiceJob.progress` counts finished scenes. `POST …/voice/playback` returns a 30-minute signed link to the WAV for the preview player.
+
+1. **Providers** (`app/story/tts/`; `GET /v1/story-voices` lists them with their voices, speed range and default speed):
+   - **Kokoro**, the default (`STORY_TTS_PROVIDER=kokoro`). It's free, runs locally, and is installed by `make install`/`make run` through the `kokoro` extra (`EXTRAS=` skips it). The first voice downloads the model from Hugging Face (about 330 MB). Twelve English voices are offered. It returns word timestamps and needs about 9 s for a 35 s voiceover on Apple silicon.
+   - **ElevenLabs** (hosted). Set `ELEVENLABS_API_KEY`; optionally `ELEVENLABS_MODEL` (default `eleven_multilingual_v2`) and `ELEVENLABS_VOICES="voice_id:Label,..."` (by default a few premade voices, which depend on your account). It uses the character-timestamp endpoint, sends neighbouring scenes as `previous_text`/`next_text` so intonation flows, and is billed per character: set `ELEVENLABS_COST_PER_1K_CHARS` to your plan's price for the cost logs.
+   - **Demo** produces tones instead of a voice, for tests and offline use.
+2. **Speed:** each provider has a range and a default. At 1.0 Kokoro reads about 180–200 words per minute, while scripts are planned at 130–150, so its default is 0.8. The real length is measured on the audio, never assumed.
+3. **Per scene:** each scene is spoken separately, decoded to 48 kHz mono, and trimmed of edge silence below −45 dBFS, keeping a 40 ms lead and an 80 ms tail.
+4. **Joining:** scenes are joined with exactly 0.25 s of silence between them.
+5. **Loudness:** gain, then a peak limiter, corrected from the measured result until within 0.5 LU of **−14 LUFS**, with true peaks around −1.5 dBTP. Plain `loudnorm` came out 1–2 LU quiet on speech. Measured on a real Kokoro voiceover: −14.3 LUFS, −1.2 dBTP.
+6. **Word timings** are always the script's own words (`app/story/timing.py`). The timing source is chosen in this order:
+   1. the provider's timestamps;
+   2. WhisperX forced alignment of the known text (`WHISPER_ALIGN=whisperx`);
+   3. Whisper transcription of the audio;
+   4. an even spread by word length.
+
+   The source's words are matched to the script's, so "3" spoken as "three" keeps the caption "3"; unmatched words are spread over the gaps. Every word has its scene id, and each scene has its start and end in `voice.scenes`, which is also saved as the story's `timings`.
+7. **Cache and cost:**
+   - Each scene's audio and timings are cached by a hash of the provider, model, voice, speed and text (`MEDIA_DIR/story-cache/tts/`). Editing one scene re-speaks only that scene, and asking for the same voice again is free.
+   - Logs and the story's usage record the time, characters, billed (uncached) characters and cost. Kokoro's output varies by a few hundred milliseconds between runs, and the cache keeps a story's voice stable.
+8. **Too long:** if the voiceover runs over 60 s, `voice.tooLong` is set and a warning asks the creator to shorten the script (`POST …/script/regenerate` with `shorten: true`). The audio is never cut.
+9. **Staleness and safety:**
+   - Changing a scene's narration marks the voice `stale`; title or visual edits don't.
+   - The script can't be edited while the voice is generating (`STORY_BUSY`), and a newer request, or deleting the story, discards an in-flight result.
+   - Unavailable providers (network, rate limit, 5xx) retry up to 3 times with backoff; rejected text fails at once.
+   - Deleting a story or the account deletes its voice files (`MEDIA_DIR/stories/<id>/`).
+
+### Adding a voice provider
+
+Subclass `TTSProvider` (`app/story/tts/base.py`) and register it in `PROVIDERS` (`app/story/tts/__init__.py`):
+
+```python
+class MyProvider(TTSProvider):
+    id, label = "mytts", "My TTS"
+    speed_range, default_speed = (0.8, 1.2), 1.0
+
+    @property
+    def cost_per_character(self):  # USD, for cost logs; 0 for local engines
+        return 0.00015
+
+    def unavailable_reason(self):  # shown in the voice picker; None when usable
+        return None if self.settings.my_tts_key else "Set MY_TTS_KEY to use My TTS."
+
+    def voices(self):
+        return [Voice("narrator", "Narrator", "Calm · male")]
+
+    def synthesize(self, text, voice, speed, destination, context):
+        destination.write_bytes(call_my_api(text, voice, speed))  # any format FFmpeg reads
+        return Speech(words=None, characters=len(text))  # None: aligned automatically
+```
+
+Raise `TTSUnavailable` for failures worth retrying (network, quota, outage) and `TTSFailed` when the text or voice is rejected. Return word timestamps (`[{"text", "start", "end"}]`, seconds from the file's start) when the API has them. Otherwise return `words=None` and the timing fallbacks above apply. Trimming, pauses, loudness, caching and cost logging are handled for every provider. Bump the class's `version` when its output for the same input changes, so cached audio isn't reused. `tests/test_story_voice.py` shows how to test an HTTP provider against a mocked API.
+
 ### Adding a genre template
 
 Add a file to `app/story/genres/`, for example `scifi.py`:
@@ -201,7 +256,7 @@ It's discovered automatically and appears in `GET /v1/story-genres`, ordered by 
 - `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
 - `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
 - `app/llm.py`: shared Claude client (structured JSON output, prompt caching, error mapping, token and cost logging) and the retry-once helper.
-- `app/story/`: Story Mode genre templates, script prompt, validation and timing, script cache, story service.
+- `app/story/`: Story Mode genre templates, script prompt, validation and timing, content-hash cache, story service; `tts/` voice providers, `audio.py` scene joining and loudness, `timing.py` word timings, `voice.py` the voiceover pipeline, `worker.py` background voice jobs.
 - `app/highlights/`: Claude prompt, candidate validation and sentence snapping, transcript windows, optional loudness/scene signals.
 - `app/captions/`: chunking, presets, glyph measurement, ASS/SRT writers and caption-track service; `app/routers/captions.py` exposes presets and per-clip tracks.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.

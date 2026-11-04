@@ -14,10 +14,11 @@ import logging
 
 from sqlalchemy import delete, or_, select
 
-from .db_models import Base, ProjectRecord, UserRecord
+from .db_models import Base, ProjectRecord, StoryRecord, UserRecord
 from .errors import ApiError
 from .social.adapters.base import ProviderError
 from .social.db_models import OAuthState, SocialAccount
+from .story.worker import remove_story_files
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,10 @@ def delete_account(app, user_id: str) -> dict:
                 token = None
             revocations.append((account.platform, token))
         db.execute(delete(OAuthState).where(OAuthState.user_id == user_id))
+        stories = list(db.scalars(select(StoryRecord.id).where(StoryRecord.userId == user_id)))
         purge(db, user_id)
+    for story_id in stories:  # voiceovers and other story files, after the commit
+        remove_story_files(app.state.settings.media_dir, story_id)
     revoked, not_revoked = [], []
     for platform, token in revocations:
         adapter = accounts.adapters.get(platform)

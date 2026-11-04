@@ -4,6 +4,9 @@ UV ?= uv
 HOST ?= 127.0.0.1
 PORT ?= 8000
 FRONTEND_PORT ?= 3000
+# Optional backend extras kept installed by `make install` / `make run`. Kokoro is the
+# default Story Mode voice; use EXTRAS= for a smaller install, or add --extra align.
+EXTRAS ?= --extra kokoro
 BACKEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))backend
 FRONTEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))frontend
 
@@ -12,7 +15,7 @@ FRONTEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))frontend
 help:
 	@echo "make run      Start the backend (auto-reload) and the video processing worker"
 	@echo "make worker   Run the social publishing worker (same environment as backend)"
-	@echo "make install  Install backend dependencies"
+	@echo "make install  Install backend dependencies (EXTRAS=\"--extra kokoro\" by default)"
 	@echo "make frontend Serve the frontend at http://127.0.0.1:$(FRONTEND_PORT) (run in a second terminal)"
 	@echo "make test     Run backend tests"
 	@echo "make test-frontend Run frontend service and HTTP integration tests"
@@ -25,12 +28,12 @@ worker:
 	cd "$(BACKEND_DIR)" && $(UV) run --locked python -m app.social.worker
 
 install:
-	cd "$(BACKEND_DIR)" && $(UV) sync --locked
+	cd "$(BACKEND_DIR)" && $(UV) sync --locked $(EXTRAS)
 
 # API plus the video processing worker: uploads are transcribed and analyzed by the
 # worker, so the two always run together. Ctrl-C stops both.
 run:
-	cd "$(BACKEND_DIR)" && $(UV) sync --locked --quiet && trap 'kill 0' INT TERM; \
+	cd "$(BACKEND_DIR)" && $(UV) sync --locked --quiet $(EXTRAS) && trap 'kill 0' INT TERM; \
 		$(UV) run --locked python -m app.jobs.worker & \
 		$(UV) run --locked uvicorn app.main:app --reload --host "$(HOST)" --port "$(PORT)" & \
 		wait

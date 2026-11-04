@@ -78,6 +78,12 @@ class Database:
             "auth_tokens": [("session_id", "VARCHAR(40)")],
             "publish_batches": [("scheduled_at", "BIGINT")],
             "publish_jobs": [("scheduled_at", "BIGINT")],
+            "story_projects": [
+                ("lease_owner", "VARCHAR(40)"),
+                ("lease_until", "BIGINT"),
+                ("attempts", "INTEGER"),
+                ("progress", "FLOAT"),
+            ],
         }
         for table, columns in additions.items():
             existing = {column["name"] for column in inspect(self.engine).get_columns(table)}

@@ -83,6 +83,21 @@ class Settings:
     story_fallbacks: str = field(
         default_factory=lambda: os.environ.get("STORY_FALLBACKS", "default").strip().lower()
     )
+    # Story Mode voiceover: kokoro (local, free) | elevenlabs (hosted) | demo (tones).
+    story_tts_provider: str = field(
+        default_factory=lambda: os.environ.get("STORY_TTS_PROVIDER", "kokoro").strip().lower()
+    )
+    elevenlabs_api_key: str = field(
+        default_factory=lambda: os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    )
+    elevenlabs_model: str = field(
+        default_factory=lambda: os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2").strip()
+    )
+    # "voice_id:Label,voice_id:Label"; empty uses a few premade voices.
+    elevenlabs_voices: str = field(default_factory=lambda: os.environ.get("ELEVENLABS_VOICES", ""))
+    elevenlabs_cost_per_1k_chars: float = field(
+        default_factory=lambda: float(os.environ.get("ELEVENLABS_COST_PER_1K_CHARS", "0") or 0)
+    )
     job_lease_seconds: int = 300
     # Sign-in. Google OIDC is enabled when both client values are set.
     google_client_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLIENT_ID", ""))

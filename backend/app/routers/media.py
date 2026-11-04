@@ -22,6 +22,56 @@ def media_signature(project_id: str, expires: int, key: str) -> str:
     return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
 
 
+def stream_file(request: Request, path, content_type: str, disposition: str = "inline"):
+    """Stream a local file with single-range support (seeking in <video>/<audio>)."""
+    size = path.stat().st_size
+    start, end, status = 0, size - 1, 200
+    range_header = request.headers.get("range")
+    if range_header:
+        match = RANGE_RE.fullmatch(range_header.strip())
+        if not match or size == 0:
+            return StreamingResponse(
+                iter(()),
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+        first, last = match.groups()
+        if not first:
+            start = max(0, size - int(last or 0))
+        else:
+            start = int(first)
+            end = min(size - 1, int(last)) if last else size - 1
+        if start >= size or start > end:
+            return StreamingResponse(
+                iter(()),
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            )
+        status = 206
+    length = end - start + 1
+
+    def chunks():
+        with path.open("rb") as media_file:
+            media_file.seek(start)
+            remaining = length
+            while remaining:
+                chunk = media_file.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": disposition,
+    }
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return StreamingResponse(chunks(), status_code=status, media_type=content_type, headers=headers)
+
+
 @router.post(
     "/v1/projects/{id}/playback",
     response_model=PlaybackLink,
@@ -68,54 +118,7 @@ def stream_media(project_id: str, request: Request, expires: int, signature: str
     if not path.is_file():
         raise ApiError("NOT_FOUND", "Source video not found.", 404)
 
-    size = path.stat().st_size
-    start, end, status = 0, size - 1, 200
-    range_header = request.headers.get("range")
-    if range_header:
-        match = RANGE_RE.fullmatch(range_header.strip())
-        if not match or size == 0:
-            return StreamingResponse(
-                iter(()),
-                status_code=416,
-                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
-            )
-        first, last = match.groups()
-        if not first:
-            count = int(last or 0)
-            start = max(0, size - count)
-        else:
-            start = int(first)
-            end = min(size - 1, int(last)) if last else size - 1
-        if start >= size or start > end:
-            return StreamingResponse(
-                iter(()),
-                status_code=416,
-                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
-            )
-        status = 206
-
-    length = end - start + 1
-
-    def chunks():
-        with path.open("rb") as media_file:
-            media_file.seek(start)
-            remaining = length
-            while remaining:
-                chunk = media_file.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(length),
-        "Cache-Control": "private, no-store",
-        "Content-Disposition": "inline",
-    }
-    if status == 206:
-        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    return StreamingResponse(chunks(), status_code=status, media_type=content_type, headers=headers)
+    return stream_file(request, path, content_type)
 
 
 @router.get("/v1/rendered/{render_id}", operation_id="streamRenderedClip")
@@ -144,48 +147,5 @@ def stream_rendered(
         filename = record.fileName
     if not path.is_file():
         raise ApiError("NOT_FOUND", "Rendered video not found.", 404)
-    size = path.stat().st_size
-    start, end, status = 0, size - 1, 200
-    range_header = request.headers.get("range")
-    if range_header:
-        match = RANGE_RE.fullmatch(range_header.strip())
-        if not match or size == 0:
-            return StreamingResponse(
-                iter(()),
-                status_code=416,
-                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
-            )
-        first, last = match.groups()
-        start = max(0, size - int(last or 0)) if not first else int(first)
-        if first:
-            end = min(size - 1, int(last)) if last else size - 1
-        if start >= size or start > end:
-            return StreamingResponse(
-                iter(()),
-                status_code=416,
-                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
-            )
-        status = 206
-    length = end - start + 1
-
-    def chunks():
-        with path.open("rb") as video:
-            video.seek(start)
-            remaining = length
-            while remaining:
-                chunk = video.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
     disposition = "attachment" if download else "inline"
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(length),
-        "Cache-Control": "private, no-store",
-        "Content-Disposition": f'{disposition}; filename="{filename}"',
-    }
-    if status == 206:
-        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    return StreamingResponse(chunks(), status_code=status, media_type="video/mp4", headers=headers)
+    return stream_file(request, path, "video/mp4", f'{disposition}; filename="{filename}"')
