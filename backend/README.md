@@ -126,16 +126,70 @@ The worker's analysis stage sends the stored transcript to the Claude API and st
 3. **Long videos** (`app/highlights/transcript.py`): a transcript estimated above `HIGHLIGHT_WINDOW_TOKENS` is split into windows that overlap by 45 s (longer than any clip, so a moment on a window edge appears whole somewhere). Each window yields candidates; a final request compares all of them side by side and re-ranks them.
 4. **Optional signals** (`HIGHLIGHT_SIGNALS=true`, off by default; `app/highlights/signals.py`): FFmpeg's `ebur128` measures momentary loudness and `scdet` finds scene changes. Each candidate's score moves by at most ±1.25 points for being louder or more visually dynamic than the rest of the video, then candidates are re-sorted. The adjustment is shown on the suggestion card.
 5. **Results and failures**: suggestions show one *Engagement* score (score × 10). A video with too little speech, or where the model finds no usable moment, ends as `NO_HIGHLIGHTS` with an explanation and no retry. Missing credentials, rate limits and outages end as retryable `ANALYSIS_FAILED`; retrying re-runs only analysis.
-6. **Logs**: each request logs model, latency, input/output/cached tokens, stop reason and request ID; each job logs the total calls, tokens and estimated cost (prices in `app/highlights/llm.py`).
+6. **Logs**: each request logs model, latency, input/output/cached tokens, stop reason and request ID; each job logs the total calls, tokens and estimated cost (prices in `app/llm.py`).
 
 Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (default `high`), the transcript as a cached prefix (retries and re-ranking reuse it), and, on models that support it, the server-side refusal fallback (`fallbacks: "default"`; `HIGHLIGHT_FALLBACKS=off` disables it). Credentials come from `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile.
 
 ### Changing the model or prompt
 
-- **Model**: set `HIGHLIGHT_MODEL` (default `claude-opus-5-5`; e.g. `claude-sonnet-5-5` is cheaper, `claude-haiku-5-5` cheapest) and restart `make run`. The model name is saved with every analysis run. Add a new model's prices to `PRICES` in `app/highlights/llm.py` for cost logging (unknown models log tokens only), and to `FALLBACK_MODELS` only if it accepts server-side fallbacks. Tune `HIGHLIGHT_EFFORT` alongside the model: lower effort is faster and cheaper.
+- **Model**: set `HIGHLIGHT_MODEL` (default `claude-opus-5-5`; e.g. `claude-sonnet-5-5` is cheaper, `claude-haiku-5-5` cheapest) and restart `make run`. The model name is saved with every analysis run. Add a new model's prices to `PRICES` in `app/llm.py` for cost logging (unknown models log tokens only), and to `FALLBACK_MODELS` only if it accepts server-side fallbacks. Tune `HIGHLIGHT_EFFORT` alongside the model: lower effort is faster and cheaper.
 - **Prompt**: edit `SYSTEM`, `GUIDANCE`, `RETRY` or `RERANK_SYSTEM` in `app/highlights/prompt.py`, keeping the `{min_seconds}`, `{max_seconds}` and `{count}` placeholders and the output schema in sync with `parse_candidates`. Bump `PROMPT_VERSION`; it is stored with each run (shown as *prompt* in the suggestions footer) so results can be traced to the prompt that produced them.
 - **Clip length / count**: `highlight_min_seconds` / `highlight_max_seconds` in `app/config.py` and `HIGHLIGHT_CANDIDATES`; the prompt and validation both read them.
 - Run `make test` afterwards: `tests/test_highlights.py` covers validation, snapping, retries, windowing, signals and the request shape with a mocked LLM.
+
+## Story Mode
+
+Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle") or a pasted story into a narrated Short. **Step 1, the script, is implemented.** The voiceover, background, captions, music and render steps are coming next.
+
+1. **Request** (`POST /v1/stories`): either a topic (3–300 characters) or a pasted story (40–6,000 characters), plus a genre, a target length of 30, 45 or 60 seconds, and an optional tone (each genre has a default tone).
+2. **Prompt** (`app/story/prompt.py`): the rules are:
+   - a hook of at most 7 words (under 3 seconds spoken), which also opens the first scene;
+   - short spoken-style sentences;
+   - a word budget of 130–150 words per minute of the target length;
+   - a clear ending or twist;
+   - no real people's names and no copyrighted characters or brands.
+
+   A pasted story is adapted and tightened but never given new events, and a short one is never padded. The topic or story is sent as a cached block marked as data, followed by the length, word budget, scene count and tone. The answer is structured JSON: `{"title", "hook", "scenes": [{"id", "narration", "visual_description", "mood"}], "estimated_seconds"}`.
+3. **Validation** (`app/story/script.py`):
+   - Every field is checked: it must be present and non-empty, within its length limit, with 1–12 scenes and at most 400 words.
+   - Scene ids are renumbered, and `estimated_seconds` is recomputed at 140 words per minute plus a 0.25 s pause between scenes, so the model's own estimate is never trusted.
+   - **Structural problems** (or invalid JSON, a refusal, a truncated answer) are retried once with the problems listed; a second failure returns `SCRIPT_FAILED`.
+   - **Timing problems** (hook too long or not first, outside the word budget, over 60 s) are also retried once. If the second answer still has them, it is accepted and the problems are shown to the creator as warnings.
+4. **Timing:** at 140 wpm the top of the 150-wpm budget would run past 60 s once pauses are added, so the 60-second budget is capped at 120–135 words. The real length is measured on the generated audio in the voiceover step.
+5. **Editing:**
+   - `PUT /v1/stories/{id}/script` saves the creator's edits. Structure is enforced (`INVALID_SCRIPT` explains what's wrong), but timing only produces warnings.
+   - `POST …/script/regenerate` writes a new version; with `shorten: true` it rewrites the current script shorter.
+   - Both take the story's `revision`, so an edit made in another tab is never overwritten (`STALE_REVISION`).
+6. **Project file:** each story is a `story_projects` row whose JSON `document` holds:
+   - the request, script, source (generated or edited), model, prompt version and usage;
+   - empty `voice`, `timings`, `background`, `music` and `style` slots for the later steps.
+
+   Deleting the account deletes its stories.
+7. **Cost and caching:**
+   - Scripts are cached by a content hash of the prompt version, model, effort and request (`MEDIA_DIR/story-cache/scripts/`), so asking again for the same script is free. Regenerating uses a new variant key.
+   - Each call logs latency, tokens and cost, and the usage is saved in the document.
+   - A script typically takes 10–20 s and about $0.03–0.04 with `claude-opus-5-5` at medium effort. Generation is limited to 6 per creator per minute.
+
+Settings: `STORY_MODEL` (default `claude-opus-5-5`; `demo` writes a canned script offline), `STORY_EFFORT` (default `medium`) and `STORY_FALLBACKS`. They use the same Claude credentials and shared client (`app/llm.py`) as highlight detection.
+
+### Adding a genre template
+
+Add a file to `app/story/genres/`, for example `scifi.py`:
+
+```python
+from . import Genre
+
+GENRE = Genre(
+    id="scifi",
+    label="Sci-fi",
+    guidance="One strange technology, one human cost, and a final reveal that changes its meaning.",
+    default_tone="wonder with an edge",
+    moods=("curious", "uneasy", "awed", "haunting"),
+    order=60,
+)
+```
+
+It's discovered automatically and appears in `GET /v1/story-genres`, ordered by `order`. `guidance` is sent to the model with every script in that genre. Bump `PROMPT_VERSION` in `app/story/prompt.py` if existing scripts in that genre should not be served from the cache. Run `make test`: `tests/test_story_script.py` checks every genre's template and that demo scripts fit each length.
 
 ## Modules and checks
 
@@ -146,7 +200,9 @@ Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (defau
 - `app/renderer.py`: FFmpeg vertical MP4 rendering.
 - `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
 - `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
-- `app/highlights/`: Claude prompt and client, candidate validation and sentence snapping, transcript windows, optional loudness/scene signals.
+- `app/llm.py`: shared Claude client (structured JSON output, prompt caching, error mapping, token and cost logging) and the retry-once helper.
+- `app/story/`: Story Mode genre templates, script prompt, validation and timing, script cache, story service.
+- `app/highlights/`: Claude prompt, candidate validation and sentence snapping, transcript windows, optional loudness/scene signals.
 - `app/captions/`: chunking, presets, glyph measurement, ASS/SRT writers and caption-track service; `app/routers/captions.py` exposes presets and per-clip tracks.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.
 - `app/auth.py`, `app/models.py`, `app/config.py`, `app/main.py`: authentication, schemas, settings, and app lifecycle.

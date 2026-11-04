@@ -1,15 +1,14 @@
-"""Claude API client for highlight detection, with structured JSON output.
+"""Claude API client with structured JSON output, shared by highlight detection
+and Story Mode.
 
-Each call logs latency, token usage and estimated cost. The model is configurable
-with HIGHLIGHT_MODEL; tests inject a fake with the same `complete` method.
+Each call logs latency, token usage and estimated cost. Models are configurable
+(HIGHLIGHT_MODEL, STORY_MODEL); tests inject a fake with the same `complete` method.
 """
 
 import json
 import logging
 import time
 from dataclasses import dataclass, field
-
-from .validate import InvalidOutput
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,11 @@ FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "clau
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
-class HighlightUnavailable(RuntimeError):
+class InvalidOutput(ValueError):
+    """The model's answer is unusable; the message is fed back on retry."""
+
+
+class LLMUnavailable(RuntimeError):
     """The model could not be reached or the request was rejected (retryable job)."""
 
 
@@ -73,9 +76,18 @@ class Usage:
         )
 
 
-class ClaudeHighlightModel:
-    def __init__(self, model: str, effort: str = "high", fallbacks: str = "default", client=None):
+class ClaudeModel:
+    def __init__(
+        self,
+        model: str,
+        effort: str = "high",
+        fallbacks: str = "default",
+        client=None,
+        purpose: str = "Highlight",
+        max_tokens: int = 16000,
+    ):
         self.model, self.effort, self.fallbacks = model, effort, fallbacks
+        self.purpose, self.max_tokens = purpose, max_tokens
         self._client = client
         self.usage = Usage()
 
@@ -89,7 +101,7 @@ class ClaudeHighlightModel:
         return self._client
 
     def complete(self, system: str, cached: str, variable: str, schema: dict) -> dict:
-        """One structured-output request. `cached` (the transcript) is a stable,
+        """One structured-output request. `cached` (a transcript, a story) is a stable,
         cacheable prefix; `variable` (guidance, retry feedback) follows it."""
         import anthropic
 
@@ -100,7 +112,7 @@ class ClaudeHighlightModel:
         try:
             response = self.client.beta.messages.create(
                 model=self.model,
-                max_tokens=16000,
+                max_tokens=self.max_tokens,
                 system=system,
                 messages=[
                     {
@@ -122,29 +134,31 @@ class ClaudeHighlightModel:
                 **options,
             )
         except anthropic.AuthenticationError as exc:
-            raise HighlightUnavailable(
+            raise LLMUnavailable(
                 "Claude API authentication failed; set ANTHROPIC_API_KEY or run `ant auth login`."
             ) from exc
         except anthropic.BadRequestError as exc:
-            raise HighlightUnavailable(f"Claude API rejected the request: {exc.message}") from exc
+            raise LLMUnavailable(f"Claude API rejected the request: {exc.message}") from exc
         except anthropic.RateLimitError as exc:
-            raise HighlightUnavailable("Claude API rate limit reached; retry later.") from exc
+            raise LLMUnavailable("Claude API rate limit reached; retry later.") from exc
         except anthropic.APIStatusError as exc:
-            raise HighlightUnavailable(f"Claude API error {exc.status_code}.") from exc
+            raise LLMUnavailable(f"Claude API error {exc.status_code}.") from exc
         except anthropic.APIConnectionError as exc:
-            raise HighlightUnavailable("Could not reach the Claude API.") from exc
+            raise LLMUnavailable("Could not reach the Claude API.") from exc
         except TypeError as exc:
             # The SDK raises TypeError when no API key, token or `ant` profile exists.
             if "authentication" not in str(exc):
                 raise
-            raise HighlightUnavailable(
-                "No Claude API credentials: set ANTHROPIC_API_KEY (or HIGHLIGHT_MODEL=demo)."
+            raise LLMUnavailable(
+                "No Claude API credentials: set ANTHROPIC_API_KEY (or HIGHLIGHT_MODEL=demo / "
+                "STORY_MODEL=demo)."
             ) from exc
         elapsed = time.monotonic() - started
         served_by = getattr(response, "model", None) or self.model
         self.usage.add(served_by, response.usage, elapsed)
         logger.info(
-            "Highlight LLM call: %s, %.1fs, %d in / %d out tokens (%d cached), stop=%s, req=%s",
+            "%s LLM call: %s, %.1fs, %d in / %d out tokens (%d cached), stop=%s, req=%s",
+            self.purpose,
             served_by,
             elapsed,
             response.usage.input_tokens,
@@ -165,3 +179,35 @@ class ClaudeHighlightModel:
             return json.loads(text)
         except ValueError as exc:
             raise InvalidOutput("The answer was not valid JSON.") from exc
+
+
+def ask(llm, system: str, cached: str, guidance: str, accept, retry: str, failure=RuntimeError):
+    """Call the model; on unusable output retry once, telling it what was wrong.
+
+    `accept(data)` returns (result, issues); a None result rejects the answer and its
+    issues are sent back using the `retry` template ({problems}). Raises `failure`.
+    """
+    problems = None
+    for attempt in (1, 2):
+        variable = guidance + (
+            "\n\n" + retry.format(problems="\n".join(problems)) if problems else ""
+        )
+        try:
+            result, issues = accept(llm.complete(system, cached, variable, schema=accept.schema))
+        except InvalidOutput as exc:
+            result, issues = None, [str(exc)]
+        if result is not None:
+            if issues:
+                logger.info(
+                    "Accepted %s output with notes: %s", llm_purpose(llm), "; ".join(issues)
+                )
+            return result
+        problems = issues
+        logger.warning(
+            "%s output rejected (attempt %d): %s", llm_purpose(llm), attempt, "; ".join(issues)
+        )
+    raise failure("; ".join(problems))
+
+
+def llm_purpose(llm) -> str:
+    return getattr(llm, "purpose", "LLM")

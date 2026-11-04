@@ -1,21 +1,20 @@
-from .llm import ClaudeHighlightModel, HighlightUnavailable
+from ..llm import ClaudeModel, InvalidOutput, LLMUnavailable
 from .prompt import PROMPT_VERSION
 from .service import HighlightFailed, NoHighlights, find_highlights
-from .validate import InvalidOutput
 
 
-def build_model(settings) -> ClaudeHighlightModel:
-    return ClaudeHighlightModel(
+def build_model(settings) -> ClaudeModel:
+    return ClaudeModel(
         settings.highlight_model, settings.highlight_effort, settings.highlight_fallbacks
     )
 
 
 __all__ = [
     "PROMPT_VERSION",
-    "ClaudeHighlightModel",
+    "ClaudeModel",
     "HighlightFailed",
-    "HighlightUnavailable",
     "InvalidOutput",
+    "LLMUnavailable",
     "NoHighlights",
     "build_model",
     "find_highlights",

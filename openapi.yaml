@@ -1622,6 +1622,239 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/story-genres:
+    get:
+      tags:
+      - Story
+      summary: Genres
+      operationId: listStoryGenres
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryGenres'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/stories:
+    get:
+      tags:
+      - Story
+      summary: List Stories
+      operationId: listStories
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryList'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - Story
+      summary: Create
+      operationId: createStory
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoryCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/stories/{id}:
+    get:
+      tags:
+      - Story
+      summary: Get Story
+      operationId: getStory
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+      - Story
+      summary: Delete
+      operationId: deleteStory
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/stories/{id}/script:
+    put:
+      tags:
+      - Story
+      summary: Update Script
+      operationId: updateStoryScript
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoryScriptUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/stories/{id}/script/regenerate:
+    post:
+      tags:
+      - Story
+      summary: Regenerate
+      operationId: regenerateStoryScript
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoryRegenerateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -3589,6 +3822,286 @@ components:
       - caption
       - hashtags
       title: InstagramPost
+    Story:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        status:
+          type: string
+          enum:
+          - draft
+          title: Status
+        revision:
+          type: integer
+          title: Revision
+        createdAt:
+          type: integer
+          title: Createdat
+        updatedAt:
+          type: integer
+          title: Updatedat
+        genre:
+          type: string
+          title: Genre
+        targetSeconds:
+          type: integer
+          title: Targetseconds
+        tone:
+          type: string
+          title: Tone
+        topic:
+          title: Topic
+          type: string
+          nullable: true
+        story:
+          title: Story
+          type: string
+          nullable: true
+        script:
+          $ref: '#/components/schemas/StoryScript'
+        scriptSource:
+          type: string
+          enum:
+          - generated
+          - edited
+          title: Scriptsource
+        wordCount:
+          type: integer
+          title: Wordcount
+        wordBudget:
+          items:
+            type: integer
+          type: array
+          title: Wordbudget
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+      type: object
+      required:
+      - id
+      - title
+      - status
+      - revision
+      - createdAt
+      - updatedAt
+      - genre
+      - targetSeconds
+      - tone
+      - topic
+      - story
+      - script
+      - scriptSource
+      - wordCount
+      - wordBudget
+      - warnings
+      title: Story
+    StoryCreateRequest:
+      properties:
+        topic:
+          title: Topic
+          type: string
+          maxLength: 300
+          nullable: true
+        story:
+          title: Story
+          type: string
+          maxLength: 6000
+          nullable: true
+        genre:
+          type: string
+          maxLength: 40
+          title: Genre
+        targetSeconds:
+          type: integer
+          enum:
+          - 30
+          - 45
+          - 60
+          title: Targetseconds
+          default: 45
+        tone:
+          type: string
+          maxLength: 80
+          title: Tone
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - genre
+      title: StoryCreateRequest
+    StoryGenre:
+      properties:
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+        defaultTone:
+          type: string
+          title: Defaulttone
+        moods:
+          items:
+            type: string
+          type: array
+          title: Moods
+      type: object
+      required:
+      - id
+      - label
+      - defaultTone
+      - moods
+      title: StoryGenre
+    StoryGenres:
+      properties:
+        genres:
+          items:
+            $ref: '#/components/schemas/StoryGenre'
+          type: array
+          title: Genres
+        lengths:
+          items:
+            type: integer
+          type: array
+          title: Lengths
+      type: object
+      required:
+      - genres
+      - lengths
+      title: StoryGenres
+    StoryList:
+      properties:
+        stories:
+          items:
+            $ref: '#/components/schemas/StorySummary'
+          type: array
+          title: Stories
+      type: object
+      required:
+      - stories
+      title: StoryList
+    StoryRegenerateRequest:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        shorten:
+          type: boolean
+          title: Shorten
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      title: StoryRegenerateRequest
+    StoryScene:
+      properties:
+        id:
+          type: integer
+          title: Id
+        narration:
+          type: string
+          maxLength: 5000
+          title: Narration
+        visual_description:
+          type: string
+          maxLength: 5000
+          title: Visual Description
+        mood:
+          type: string
+          maxLength: 500
+          title: Mood
+      type: object
+      required:
+      - id
+      - narration
+      - visual_description
+      - mood
+      title: StoryScene
+    StoryScript:
+      properties:
+        title:
+          type: string
+          maxLength: 1000
+          title: Title
+        hook:
+          type: string
+          maxLength: 1000
+          title: Hook
+        scenes:
+          items:
+            $ref: '#/components/schemas/StoryScene'
+          type: array
+          maxItems: 40
+          title: Scenes
+        estimated_seconds:
+          type: integer
+          title: Estimated Seconds
+          default: 0
+      type: object
+      required:
+      - title
+      - hook
+      - scenes
+      title: StoryScript
+    StoryScriptUpdate:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        script:
+          $ref: '#/components/schemas/StoryScript'
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      - script
+      title: StoryScriptUpdate
+    StorySummary:
+      properties:
+        id:
+          type: string
+          title: Id
+        title:
+          type: string
+          title: Title
+        status:
+          type: string
+          enum:
+          - draft
+          title: Status
+        genre:
+          type: string
+          title: Genre
+        targetSeconds:
+          type: integer
+          title: Targetseconds
+        estimatedSeconds:
+          type: integer
+          title: Estimatedseconds
+        createdAt:
+          type: integer
+          title: Createdat
+        updatedAt:
+          type: integer
+          title: Updatedat
+      type: object
+      required:
+      - id
+      - title
+      - status
+      - genre
+      - targetSeconds
+      - estimatedSeconds
+      - createdAt
+      - updatedAt
+      title: StorySummary
   responses:
     Error401:
       description: UNAUTHENTICATED — session missing or invalid.

@@ -19,7 +19,7 @@ from ..db_models import JobRecord, ProjectRecord, TranscriptRecord, UploadRecord
 from ..highlights import (
     PROMPT_VERSION,
     HighlightFailed,
-    HighlightUnavailable,
+    LLMUnavailable,
     NoHighlights,
     build_model,
     find_highlights,
@@ -205,7 +205,7 @@ class ProcessingWorker:
         except NoHighlights as exc:
             logger.info("Job %s has no highlights: %s", job_id, exc)
             return self.fail(job_id, "analyzing", "NO_HIGHLIGHTS")
-        except (HighlightFailed, HighlightUnavailable) as exc:
+        except (HighlightFailed, LLMUnavailable) as exc:
             logger.warning("Highlight detection failed for job %s: %s", job_id, exc)
             return self.fail(job_id, "analyzing", "ANALYSIS_FAILED")
         clips = [

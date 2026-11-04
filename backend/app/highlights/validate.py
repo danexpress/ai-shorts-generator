@@ -7,11 +7,9 @@ to word boundaries) so a clip never starts or ends mid-word.
 
 import math
 
+from ..llm import InvalidOutput
+
 PAD_BEFORE, PAD_AFTER = 0.15, 0.3  # breathing room, only ever taken from silence
-
-
-class InvalidOutput(ValueError):
-    """The model's answer is unusable; the message is fed back on retry."""
 
 
 def parse_candidates(data, duration: float) -> tuple[list[dict], list[str]]:

@@ -24,6 +24,7 @@ from .routers import (
     projects,
     renders,
     social,
+    story,
     transcripts,
     uploads,
     usage,
@@ -36,6 +37,7 @@ from .social.http import ProviderHTTP
 from .social.publishing import PublishingService
 from .social.security import RedactOAuthQueries
 from .store import Store
+from .story.service import StoryService
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,7 @@ def create_app(
     social_adapters: dict | None = None,
     social_copy_model=None,
     google=None,
+    story_model=None,
 ) -> FastAPI:
     settings = settings or Settings()
     owns_database = database is None
@@ -103,6 +106,9 @@ def create_app(
     )
     app.state.social_publishing = PublishingService(
         database, settings, app.state.social_accounts, clock
+    )
+    app.state.story = StoryService(
+        database, settings, clock, (lambda: story_model) if story_model else None
     )
     app.add_middleware(RedactOAuthQueries)
     app.state.database = database
@@ -176,6 +182,7 @@ def create_app(
         captions.router,
         usage.router,
         social.router,
+        story.router,
     ):
         app.include_router(router)
     return app

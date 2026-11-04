@@ -2,9 +2,10 @@
 
 import logging
 
+from ..llm import ask
 from . import prompt
 from .transcript import format_lines, sentences, windows
-from .validate import InvalidOutput, dedupe, parse_candidates, snap
+from .validate import dedupe, parse_candidates, snap
 
 logger = logging.getLogger(__name__)
 
@@ -22,23 +23,7 @@ def _transcript_block(units: list[dict], duration: float) -> str:
 
 
 def _ask(llm, system: str, cached: str, guidance: str, accept) -> list[dict]:
-    """Call the model; on unusable output retry once, telling it what was wrong."""
-    problems = None
-    for attempt in (1, 2):
-        variable = guidance + (
-            "\n\n" + prompt.RETRY.format(problems="\n".join(problems)) if problems else ""
-        )
-        try:
-            result, issues = accept(llm.complete(system, cached, variable, schema=accept.schema))
-        except InvalidOutput as exc:
-            result, issues = None, [str(exc)]
-        if result is not None:
-            if issues:
-                logger.info("Dropped invalid highlight candidates: %s", "; ".join(issues))
-            return result
-        problems = issues
-        logger.warning("Highlight output rejected (attempt %d): %s", attempt, "; ".join(issues))
-    raise HighlightFailed("; ".join(problems))
+    return ask(llm, system, cached, guidance, accept, prompt.RETRY, HighlightFailed)
 
 
 def _candidate_acceptor(units, duration, settings):

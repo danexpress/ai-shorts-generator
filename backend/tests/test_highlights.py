@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 from app.db_models import AnalysisRunRecord
 from app.highlights import (
     PROMPT_VERSION,
-    ClaudeHighlightModel,
+    ClaudeModel,
     HighlightFailed,
-    HighlightUnavailable,
     InvalidOutput,
+    LLMUnavailable,
     NoHighlights,
     find_highlights,
 )
@@ -297,7 +297,7 @@ def response(text='{"candidates": []}', stop="end_turn", model="claude-opus-5-5"
 
 def test_claude_request_uses_structured_output_caching_and_fallbacks():
     messages = FakeMessages(response('{"candidates": [{"start": 1}]}'))
-    model = ClaudeHighlightModel("claude-opus-5-5", "high", "default", client=sdk_client(messages))
+    model = ClaudeModel("claude-opus-5-5", "high", "default", client=sdk_client(messages))
     assert model.complete("SYS", "TRANSCRIPT", "GUIDE", {"type": "object"}) == {
         "candidates": [{"start": 1}]
     }
@@ -321,12 +321,10 @@ def test_claude_request_uses_structured_output_caching_and_fallbacks():
 
 def test_models_without_server_fallback_do_not_send_it():
     messages = FakeMessages(response(model="claude-haiku-5-5"))
-    ClaudeHighlightModel("claude-haiku-5-5", client=sdk_client(messages)).complete(
-        "s", "c", "v", {}
-    )
+    ClaudeModel("claude-haiku-5-5", client=sdk_client(messages)).complete("s", "c", "v", {})
     assert "fallbacks" not in messages.requests[0] and "betas" not in messages.requests[0]
     messages = FakeMessages(response())
-    ClaudeHighlightModel("claude-opus-5-5", fallbacks="off", client=sdk_client(messages)).complete(
+    ClaudeModel("claude-opus-5-5", fallbacks="off", client=sdk_client(messages)).complete(
         "s", "c", "v", {}
     )
     assert "fallbacks" not in messages.requests[0]
@@ -341,7 +339,7 @@ def test_models_without_server_fallback_do_not_send_it():
     ],
 )
 def test_unusable_responses_become_invalid_output(reply, match):
-    model = ClaudeHighlightModel("claude-opus-5-5", client=sdk_client(FakeMessages(reply)))
+    model = ClaudeModel("claude-opus-5-5", client=sdk_client(FakeMessages(reply)))
     with pytest.raises(InvalidOutput, match=match):
         model.complete("s", "c", "v", {})
 
@@ -352,14 +350,14 @@ def test_api_failures_are_reported_as_unavailable():
     error = anthropic.APIConnectionError(
         request=httpx2.Request("POST", "https://api.anthropic.com")
     )
-    model = ClaudeHighlightModel("claude-opus-5-5", client=sdk_client(FakeMessages(error=error)))
-    with pytest.raises(HighlightUnavailable, match="Could not reach"):
+    model = ClaudeModel("claude-opus-5-5", client=sdk_client(FakeMessages(error=error)))
+    with pytest.raises(LLMUnavailable, match="Could not reach"):
         model.complete("s", "c", "v", {})
 
 
 def test_unknown_models_log_tokens_without_inventing_a_price():
     reply = response(model="claude-future-9")
-    model = ClaudeHighlightModel("claude-future-9", client=sdk_client(FakeMessages(reply)))
+    model = ClaudeModel("claude-future-9", client=sdk_client(FakeMessages(reply)))
     model.complete("s", "c", "v", {})
     assert model.usage.cost is None and "cost unknown" in model.usage.summary()
 
@@ -447,7 +445,7 @@ def test_worker_reports_no_highlights_without_retry(hl_client, database, hl_sett
 def test_worker_marks_llm_outages_retryable(hl_client, database, hl_settings, clock):
     headers = login(hl_client)
     project = start(hl_client, headers)
-    run_worker(database, hl_settings, clock, FakeLLM(HighlightUnavailable("down")))
+    run_worker(database, hl_settings, clock, FakeLLM(LLMUnavailable("down")))
     status = hl_client.get(f"/v1/projects/{project}/status", headers=headers).json()
     assert (status["failureCode"], status["canRetry"]) == ("ANALYSIS_FAILED", True)
     # Retrying re-runs analysis only: the transcript is kept, so nothing is re-transcribed.
@@ -462,10 +460,10 @@ def test_missing_credentials_are_reported_as_unavailable_not_a_crash():
     error = TypeError(
         '"Could not resolve authentication method. Expected one of api_key, auth_token"'
     )
-    model = ClaudeHighlightModel("claude-opus-5-5", client=sdk_client(FakeMessages(error=error)))
-    with pytest.raises(HighlightUnavailable, match="ANTHROPIC_API_KEY"):
+    model = ClaudeModel("claude-opus-5-5", client=sdk_client(FakeMessages(error=error)))
+    with pytest.raises(LLMUnavailable, match="ANTHROPIC_API_KEY"):
         model.complete("s", "c", "v", {})
-    unrelated = ClaudeHighlightModel(
+    unrelated = ClaudeModel(
         "claude-opus-5-5", client=sdk_client(FakeMessages(error=TypeError("bug")))
     )
     with pytest.raises(TypeError):

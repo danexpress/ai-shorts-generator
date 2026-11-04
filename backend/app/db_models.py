@@ -189,6 +189,21 @@ class TranscriptRecord(Base):
     sourceDigest: Mapped[str | None] = mapped_column("source_digest", String(64))
 
 
+class StoryRecord(Base):
+    """A Story Mode project. `document` is the editable project file: request, script,
+    and (in later steps) voice, scene timings, background, music and style."""
+
+    __tablename__ = "story_projects"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    userId: Mapped[str] = mapped_column("user_id", ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20))
+    revision: Mapped[int] = mapped_column(Integer)
+    document: Mapped[dict] = mapped_column(JSON)
+    createdAt: Mapped[int] = mapped_column("created_at", BigInteger, index=True)
+    updatedAt: Mapped[int] = mapped_column("updated_at", BigInteger)
+
+
 class AnalysisRunRecord(Base):
     __tablename__ = "analysis_runs"
     runId: Mapped[str] = mapped_column("run_id", String(40), primary_key=True)

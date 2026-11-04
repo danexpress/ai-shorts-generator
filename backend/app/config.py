@@ -73,6 +73,16 @@ class Settings:
             os.environ.get("HIGHLIGHT_SIGNALS", "false").lower() in {"1", "true", "yes"}
         )
     )
+    # Story Mode script writing (Claude API). "demo" writes a canned script offline.
+    story_model: str = field(
+        default_factory=lambda: os.environ.get("STORY_MODEL", "claude-opus-5-5").strip()
+    )
+    story_effort: str = field(
+        default_factory=lambda: os.environ.get("STORY_EFFORT", "medium").strip().lower()
+    )
+    story_fallbacks: str = field(
+        default_factory=lambda: os.environ.get("STORY_FALLBACKS", "default").strip().lower()
+    )
     job_lease_seconds: int = 300
     # Sign-in. Google OIDC is enabled when both client values are set.
     google_client_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLIENT_ID", ""))
