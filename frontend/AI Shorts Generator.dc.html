@@ -40,7 +40,7 @@ const storyInitial = () => ({
   form: { mode: 'topic', topic: '', story: '', genre: 'mystery', seconds: 45, tone: '' }, creating: false, createError: null,
   list: [], listLoading: false, listError: null,
   currentId: null, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null,
-  voiceChoice: { provider: null, voice: null, speed: 1 }, renderChoice: null, audioUrl: null, audioFor: null, renders: [],
+  voiceChoice: { provider: null, voice: null, speed: 1 }, renderChoice: null, audioUrl: null, audioFor: null, renders: [], imageLinks: [],
 });
 // "Script 4.2 s · $0.0300 · Voice 11.4 s · 581 chars · Render 3.9 s · Total $0.0300"
 const costLine = (u) => {
@@ -49,6 +49,7 @@ const costLine = (u) => {
   const parts = [];
   if (u.script) parts.push('Script ' + (u.script.cached ? 'cached, free' : u.script.seconds.toFixed(1) + ' s · ' + money(u.script.costUsd)));
   if (u.voice) parts.push('Voice ' + u.voice.seconds.toFixed(1) + ' s · ' + u.voice.billedCharacters + ' new chars spoken · ' + money(u.voice.costUsd));
+  if (u.images) parts.push('Pictures ' + u.images.seconds.toFixed(1) + ' s · ' + u.images.drawn + ' drawn · ' + money(u.images.costUsd));
   if (u.render) parts.push('Render ' + u.render.seconds.toFixed(1) + ' s');
   return parts.length ? parts.join(' · ') + ' — total ' + money(u.totalCostUsd) : '';
 };
@@ -738,7 +739,7 @@ class Component extends DCLogic {
   }
   async openStory(id, story = null) {
     this.go('story');
-    this.storyState({ currentId: id, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null, audioUrl: null, audioFor: null, renders: [], renderChoice: null });
+    this.storyState({ currentId: id, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null, audioUrl: null, audioFor: null, renders: [], renderChoice: null, imageLinks: [] });
     this.loadStoryOptions();
     if (story) this.showStory(story);
     else await this.reloadStory();
@@ -762,7 +763,8 @@ class Component extends DCLogic {
     }));
     const voiceKey = story.voice ? story.revision + ':' + story.voice.durationSec + story.voice.voice + story.voice.speed : null;
     if (story.voice && this.state.story.audioFor !== voiceKey && story.status !== 'voicing') this.loadStoryAudio(story.id, voiceKey);
-    if (before && before.status === 'rendering' && story.status === 'rendered') { this.loadStoryRenders(); this.notify('Your Short is ready.'); }
+    if (before && before.status === 'rendering' && story.status === 'rendered') { this.loadStoryRenders(); this.loadStoryImages(story); this.notify('Your Short is ready.'); }
+    if (!before && story.images) this.loadStoryImages(story);
     if (before && before.status === 'voicing' && story.status === 'voiced') this.notify('The voice is ready. Have a listen.');
     this.stopStoryPolling();
     // Follow a running job while the story is on screen (checked when the timer fires).
@@ -780,6 +782,13 @@ class Component extends DCLogic {
       const { renders } = await this.api.listStoryRenders(id);
       if (id !== this.state.story.currentId) return;
       this.storyState({ renders: renders.map((r) => ({ ...r, url: this.mediaUrl(r.url), downloadUrl: this.mediaUrl(r.downloadUrl), playUrl: this.mediaUrl(r.url), downloadHref: this.mediaUrl(r.downloadUrl), createdLabel: new Date(r.createdAt).toLocaleString(), expiresLabel: fmtDate(r.expiresAt) })) });
+    } catch (e) { this.handleAuth(e); }
+  }
+  async loadStoryImages(story) {
+    if (!story.images) return this.storyState({ imageLinks: [] });
+    try {
+      const { scenes } = await this.api.getStoryImageLinks(story.id);
+      if (story.id === this.state.story.currentId) this.storyState({ imageLinks: scenes.map((s) => ({ ...s, url: this.mediaUrl(s.url) })) });
     } catch (e) { this.handleAuth(e); }
   }
   editStoryField(field, value) { this.storyState((st) => ({ draft: { ...st.draft, [field]: value }, dirty: true, scriptError: null })); }
@@ -806,7 +815,7 @@ class Component extends DCLogic {
   saveStoryScript() { const draft = this.state.story.draft; return this.storyAction('save', (id, revision) => this.api.updateStoryScript(id, { revision, script: draft })); }
   regenerateStory(shorten = false) { return this.storyAction(shorten ? 'shorten' : 'regenerate', (id, revision) => this.api.regenerateStoryScript(id, { revision, shorten })); }
   generateStoryVoice() { const c = this.state.story.voiceChoice; return this.storyAction('voice', (id, revision) => this.api.requestStoryVoice(id, { revision, provider: c.provider, voice: c.voice, speed: c.speed })); }
-  renderStoryShort() { const c = this.state.story.renderChoice; return this.storyAction('render', (id, revision) => this.api.renderStory(id, { revision, background: c.background, music: c.music || null, captionPreset: c.captionPreset, captions: c.captions, titleCard: c.titleCard })); }
+  renderStoryShort() { const c = this.state.story.renderChoice; return this.storyAction('render', (id, revision) => this.api.renderStory(id, { revision, background: c.background, music: c.music || null, captionPreset: c.captionPreset, captions: c.captions, titleCard: c.titleCard, newImages: !!c.newImages })).then(() => this.storyState((x) => ({ renderChoice: x.renderChoice && { ...x.renderChoice, newImages: false } }))); }
   setStoryVoice(patch) {
     this.storyState((st) => {
       const next = { ...st.voiceChoice, ...patch };

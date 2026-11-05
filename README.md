@@ -1,6 +1,6 @@
 # AI Shorts Generator
 
-Turns long videos into vertical Shorts. It transcribes uploads locally with Whisper, has Claude pick the most engaging moments, and renders 1080×1920 clips with karaoke captions. **Story Mode** turns a topic or a pasted story into a narrated Short: a Claude-written script, a Kokoro or ElevenLabs voiceover, a background loop, captions and optional music. Creators sign in with Google, then publish to YouTube, TikTok, X and Instagram now or on a schedule.
+Turns long videos into vertical Shorts. It transcribes uploads locally with Whisper, has Claude pick the most engaging moments, and renders 1080×1920 clips with karaoke captions. **Story Mode** turns a topic or a pasted story into a narrated Short: a Claude-written script, a Kokoro or ElevenLabs voiceover, an AI picture per scene (local FLUX or OpenAI) with slow pan and zoom, or a background loop, captions and optional music. Creators sign in with Google, then publish to YouTube, TikTok, X and Instagram now or on a schedule.
 
 ## Quick start
 

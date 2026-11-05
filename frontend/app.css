@@ -2130,3 +2130,29 @@ details[open] > summary {
     opacity: 0.5;
   }
 }
+
+.choice.bg-ai {
+  color: #fff;
+  background:
+    radial-gradient(circle at 30% 30%, #f6b26b88, transparent 45%),
+    radial-gradient(circle at 70% 70%, #6fa8dc88, transparent 50%),
+    linear-gradient(160deg, #1b1035, #3a1f5c);
+}
+.scene-thumbs {
+  display: flex;
+  gap: var(--s3);
+  overflow-x: auto;
+  padding-bottom: var(--s2);
+}
+.scene-thumbs figure {
+  margin: 0;
+  flex: 0 0 72px;
+  text-align: center;
+}
+.scene-thumbs img {
+  width: 72px;
+  height: 128px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}

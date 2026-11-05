@@ -211,7 +211,7 @@ Settings: `STORY_MODEL` (default `claude-opus-5-5`; `demo` writes a canned scrip
    - **Your library:** the creator's own uploaded videos, while their source is retained.
 
    Clips are scaled and center-cropped to 9:16 by the same filter as clip renders (`renderer.fill_filter`), then looped or trimmed to length. Only your own clips are slightly darkened (`eq` brightness, gamma and saturation) so white captions stay readable; the bundled loops are dark by design.
-   **v2 (AI images per scene):** add a `VisualSource` whose `filter()` turns one image per scene into slow pan/zoom shots. It receives the scene timeline (`start`, `end`, `visual_description`, `mood`); nothing else changes.
+   **AI pictures per scene (v2):** a fourth kind of background, described below.
 2. **Captions:**
    - The voiceover's words go through the existing karaoke caption module unchanged: `chunk_words` (1–3 words per chunk), `apply_min_duration`, then `build_ass` with the chosen preset (active-word highlight, safe-zone fitting).
    - Fillers are kept, since a scripted "hmm" is spoken on purpose.
@@ -237,6 +237,49 @@ Measured end to end with no mocks (a topic → `claude-opus-5-5` → Kokoro `bm_
 - **Voice:** 11 s, for 44.3 s of audio at −14.6 LUFS.
 - **Render:** 3.9 s, for a 45.1 s, 7 MB Short.
 - **Re-render:** 2.5 s, with the script and voice served from the cache.
+
+### AI pictures per scene (v2)
+
+Choose **AI pictures** as the background (`{"kind": "ai", "id": "flux"}`) and every scene gets its own picture, drawn from its `visual_description`. Each picture is shown with a slow pan or zoom, and the pictures crossfade at scene boundaries.
+
+1. **Prompts** (`app/story/scene_images.py`) combine:
+   - the scene's description and mood;
+   - the genre's `image_style` (e.g. mystery: *moody cinematic film still, fog and deep shadows, muted teal and amber palette*);
+   - fixed rules: a vertical composition with room for captions, no text or logos, and no real or famous people.
+
+   Every scene uses the same base seed, offset per scene, so a story's pictures look like one film.
+2. **Engines** (`app/story/images/`):
+   - **FLUX.1-schnell**, the default (`STORY_IMAGE_PROVIDER=flux`). It's free and local on Apple silicon via mflux, Apache-2.0 licensed, and installed by `make install` (the `images` extra).
+     - The first picture downloads a 4-bit build of about 9.6 GB (`FLUX_MODEL`, default `mflux-community/flux-1-schnell-mflux-q4`).
+     - Pictures are `FLUX_SIZE` (default 576×1024) in 4 steps. On a 24 GB M4 Pro that was already deep in swap, one took **59 s** at 576×1024 and 163 s at 768×1344, so an 8-scene story takes several minutes the first time. It is much faster with memory to spare.
+   - **OpenAI images** (hosted). Set `OPENAI_API_KEY`; `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`, because `gpt-image-1` was retired on 2026-10-23.
+     - `OPENAI_IMAGE_SIZE` (default `1024x1536`) and `OPENAI_IMAGE_QUALITY` (default `medium`) are passed through as-is. Check them against OpenAI's current docs: this adapter has been tested only against a mocked API.
+     - Set `OPENAI_COST_PER_IMAGE` to your price for the cost logs.
+   - **Demo** draws gradients instead of AI pictures, for tests and offline use. It's shown only when it's the default.
+3. **Motion** (`visuals.SceneImagesBackground`, one FFmpeg pass with the rest of the render):
+   - Each shot runs from its scene's start to the next scene's start, so the pauses are covered.
+   - The motions cycle through a push in, a pull out, a drift right and a drift up, using `zoompan` on a 1.5× overscanned frame so the motion stays smooth.
+   - Shots crossfade for 0.5 s exactly at each scene start; the total length matches the Short to the frame.
+   - Pictures are lightly darkened so captions stay readable.
+4. **Cache:** pictures are cached by engine, model, size, prompt and seed (`MEDIA_DIR/story-cache/images/`).
+   - Re-rendering, or changing the music, captions or title card, reuses them.
+   - Editing one scene's *What we see* redraws only that scene.
+   - `newImages: true` (*Draw new pictures* in the editor) re-rolls every seed.
+5. **Progress and errors:**
+   - While pictures are drawn, `renderJob.progress` runs from 0 to 0.9, and the editor shows *Drawing scene pictures… 40%*. The final encode is the last 10%.
+   - An engine that's busy or out of memory is retried up to 3 times (`IMAGES_UNAVAILABLE`); a refused prompt fails at once (`IMAGE_FAILED`) with the engine's message.
+   - The drawing time, the number drawn and the cost are part of the story's `usage`.
+6. **Thumbnails:** after a render, `POST /v1/stories/{id}/images/links` returns 30-minute signed links to each scene's picture (`GET /v1/story-images/{story}/{scene}`), and the editor shows them above the final preview.
+
+### Adding an image provider
+
+Subclass `ImageProvider` (`app/story/images/base.py`) and register it in `PROVIDERS` (`app/story/images/__init__.py`).
+- Implement `generate(prompt, seed, destination)`, writing a PNG or JPEG.
+- Optionally override `size`, `model`, `cost_per_image` and `unavailable_reason()`.
+- Raise `ImageUnavailable` for failures worth retrying and `ImageFailed` for refused prompts.
+- Bump `version` when its output for the same prompt and seed changes.
+
+Prompts, caching, motion, crossfades, cost logging and thumbnails are handled for every provider. `tests/test_story_images.py` tests an HTTP provider against a mocked API.
 
 ### Cost, time and cache
 
@@ -309,7 +352,7 @@ It's discovered automatically and appears in `GET /v1/story-genres`, ordered by 
 - `app/transcription/`: faster-whisper transcriber, optional WhisperX alignment, transcript cache.
 - `app/jobs/worker.py`: leased processing worker for real transcription and analysis.
 - `app/llm.py`: shared Claude client (structured JSON output, prompt caching, error mapping, token and cost logging) and the retry-once helper.
-- `app/story/`: Story Mode genre templates, script prompt, validation and timing, content-hash cache, story service; `tts/` voice providers, `audio.py` scene joining and loudness, `timing.py` word timings, `voice.py` the voiceover pipeline, `visuals.py` backgrounds, `titlecard.py` title card and captions, `music.py` music bed, `render.py` the single-pass render, `worker.py` background voice and render jobs.
+- `app/story/`: Story Mode genre templates, script prompt, validation and timing, content-hash cache, story service; `tts/` voice providers, `audio.py` scene joining and loudness, `timing.py` word timings, `voice.py` the voiceover pipeline, `visuals.py` backgrounds (loops and pan/zoom scene pictures), `images/` AI image providers, `scene_images.py` per-scene prompts and picture cache, `titlecard.py` title card and captions, `music.py` music bed, `render.py` the single-pass render, `worker.py` background voice and render jobs.
 - `app/highlights/`: Claude prompt, candidate validation and sentence snapping, transcript windows, optional loudness/scene signals.
 - `app/captions/`: chunking, presets, glyph measurement, ASS/SRT writers and caption-track service; `app/routers/captions.py` exposes presets and per-clip tracks.
 - `app/youtube.py`: supported YouTube URL validation and bounded video download.

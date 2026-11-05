@@ -12,6 +12,7 @@ from ..story.models import (
     StoryAssets,
     StoryCreateRequest,
     StoryGenres,
+    StoryImageLinks,
     StoryList,
     StoryRegenerateRequest,
     StoryRenderList,
@@ -114,3 +115,21 @@ def render(id: str, body: StoryRenderRequest, request: Request, user: SocialUser
 )
 def renders(id: str, request: Request, user: SocialUser):
     return {"renders": service(request).renders(user, id)}
+
+
+@router.post(
+    "/stories/{id}/images/links", response_model=StoryImageLinks, operation_id="getStoryImageLinks"
+)
+def image_links(id: str, request: Request, user: SocialUser):
+    """Signed links to the AI pictures of the last render (thumbnails in the editor)."""
+    return {"scenes": service(request).image_links(user, id)}
+
+
+@router.get("/story-images/{story_id}/{scene_id}", operation_id="streamStoryImage")
+def stream_image(story_id: str, scene_id: int, request: Request, expires: int, signature: str):
+    settings = request.app.state.settings
+    message = f"story-image:{story_id}:{scene_id}"
+    expected = media_signature(message, expires, settings.media_signing_key)
+    if expires <= int(request.app.state.clock()) or not hmac.compare_digest(signature, expected):
+        raise ApiError("UNAUTHENTICATED", "This picture link is invalid or expired.", 401)
+    return stream_file(request, service(request).image_file(story_id, scene_id), "image/png")

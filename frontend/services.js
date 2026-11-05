@@ -84,6 +84,8 @@
     VOICE_STALE: 'The script changed since the voice was made. Generate the voice again.',
     BACKGROUND_UNAVAILABLE: 'That background is no longer available. Pick another.',
     MUSIC_UNAVAILABLE: 'That music track is no longer available.',
+    IMAGE_FAILED: 'The image engine declined one of the scene pictures. Reword that scene’s “What we see” and render again.',
+    IMAGES_UNAVAILABLE: 'The image engine isn’t available right now. Try again, or pick another background.',
     NETWORK_ERROR: 'Can’t reach the server. Check your connection.',
     SERVER_ERROR: 'Something went wrong on our side. Try again.',
   };
@@ -128,6 +130,7 @@
     ['getStoryVoicePlayback', 'POST', '/v1/stories/{id}/voice/playback'],
     ['renderStory', 'POST', '/v1/stories/{id}/render'],
     ['listStoryRenders', 'GET', '/v1/stories/{id}/renders'],
+    ['getStoryImageLinks', 'POST', '/v1/stories/{id}/images/links'],
 
     ['listSocialAccounts', 'GET', '/v1/social-accounts'],
     ['connectSocialAccount', 'GET', '/v1/social-accounts/{id}/connect'],

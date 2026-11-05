@@ -12,4 +12,5 @@ GENRE = Genre(
     moods=("calm", "uneasy", "dread", "shock"),
     order=20,
     default_background="dusk",
+    image_style="dark atmospheric horror film still, desaturated, cold light, unsettling empty spaces",
 )

@@ -18,7 +18,9 @@ from ..social.accounts import rate_limit
 from ..store import Store, oid
 from . import cache, music, visuals
 from .genres import GENRES
+from .images import build_image_providers
 from .prompt import PROMPT_VERSION
+from .scene_images import scene_image_file
 from .script import (
     MAX_SECONDS,
     ScriptFailed,
@@ -111,11 +113,27 @@ def view(record: StoryRecord) -> dict:
         },
         "renderJob": {
             "request": render_settings(document) if record.status == "rendering" else None,
+            # While AI pictures are drawn (0-0.9), then the encode; None for plain renders.
+            "progress": record.progress if record.status == "rendering" else None,
             "error": document.get("renderError") if record.status == "render_failed" else None,
         },
+        "images": images_view(document.get("images")),
         "renderSettings": render_settings(document, saved=True),
         "lastRenderId": document.get("lastRenderId"),
         "usage": usage_view(document.get("usage") or {}),
+    }
+
+
+def images_view(images: dict | None) -> dict | None:
+    """The AI pictures of the last render: engine, variant and each scene's prompt."""
+    if not images:
+        return None
+    return {
+        "provider": images["provider"],
+        "variant": images["variant"],
+        "scenes": [
+            {"id": s["id"], "prompt": s["prompt"], "cached": s["cached"]} for s in images["scenes"]
+        ],
     }
 
 
@@ -125,6 +143,7 @@ def usage_view(usage: dict) -> dict:
         "script": usage.get("script"),
         "voice": usage.get("voice"),
         "render": usage.get("render"),
+        "images": usage.get("images"),
         "totalCostUsd": round(usage.get("totalCostUsd", 0.0), 6),
     }
 
@@ -162,10 +181,15 @@ def summary(record: StoryRecord) -> dict:
 
 
 class StoryService:
-    def __init__(self, database, settings, clock, model_factory=None, providers=None):
+    def __init__(
+        self, database, settings, clock, model_factory=None, providers=None, image_providers=None
+    ):
         self.database, self.settings, self.clock = database, settings, clock
         self.model_factory = model_factory or self.claude
         self.providers = providers if providers is not None else build_providers(settings)
+        self.image_providers = (
+            image_providers if image_providers is not None else build_image_providers(settings)
+        )
 
     def claude(self):
         return ClaudeModel(
@@ -386,7 +410,7 @@ class StoryService:
 
     def assets(self, user_id: str) -> dict:
         with self.database.sessions() as db:
-            backgrounds = visuals.available(db, self.settings, user_id)
+            backgrounds = visuals.available(db, self.settings, user_id, self.image_providers)
         return {
             "backgrounds": backgrounds,
             "music": music.available(self.settings),
@@ -419,7 +443,8 @@ class StoryService:
                 body.get("background") or render_settings(record.document, True)["background"]
             )
             offered = {
-                (item["kind"], item["id"]) for item in visuals.available(db, self.settings, user_id)
+                (item["kind"], item["id"])
+                for item in visuals.available(db, self.settings, user_id, self.image_providers)
             }
             ref_id = background.get("id") or background.get("name") or background.get("projectId")
             if (background.get("kind"), ref_id) not in offered:
@@ -438,6 +463,9 @@ class StoryService:
                     "requestedAt": self.now(),
                 },
                 "renderError": None,
+                # A new variant re-rolls every scene's seed: fresh pictures, same prompts.
+                "imageVariant": record.document.get("imageVariant", 0)
+                + bool(body.get("newImages")),
             }
             record.update(
                 status="rendering",
@@ -569,6 +597,36 @@ class StoryService:
             "url": f"/v1/story-audio/{story_id}?expires={expires}&signature={signature}",
             "expiresAt": expires * 1000,
         }
+
+    def image_links(self, user_id: str, story_id: str) -> "list[dict]":
+        """Signed thumbnail links for the last render's AI pictures."""
+        from ..routers.media import media_signature
+
+        with self.database.sessions() as db:
+            images = self.owned(db, user_id, story_id).document.get("images")
+        if not images:
+            return []
+        expires = int(self.clock()) + PLAYBACK_SECONDS
+        links = []
+        for scene in images["scenes"]:
+            message = f"story-image:{story_id}:{scene['id']}"
+            signature = media_signature(message, expires, self.settings.media_signing_key)
+            url = (
+                f"/v1/story-images/{story_id}/{scene['id']}?expires={expires}&signature={signature}"
+            )
+            links.append({"id": scene["id"], "url": url})
+        return links
+
+    def image_file(self, story_id: str, scene_id: int):
+        """A scene's cached picture, for a request that already passed the signature."""
+        with self.database.sessions() as db:
+            record = db.get(StoryRecord, story_id)
+            images = record.document.get("images") if record else None
+        scene = next((s for s in (images or {}).get("scenes", []) if s["id"] == scene_id), None)
+        path = scene_image_file(self.settings, scene["key"]) if scene else None
+        if not path or not path.is_file():
+            raise ApiError("NOT_FOUND", "Picture not found.", 404)
+        return path
 
     def voice_file(self, story_id: str):
         """The current voiceover file, for a request that already passed the signature."""

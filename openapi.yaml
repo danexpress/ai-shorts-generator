@@ -2104,6 +2104,91 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/stories/{id}/images/links:
+    post:
+      tags:
+      - Story
+      summary: Image Links
+      description: Signed links to the AI pictures of the last render (thumbnails in the editor).
+      operationId: getStoryImageLinks
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryImageLinks'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/story-images/{story_id}/{scene_id}:
+    get:
+      tags:
+      - Story
+      summary: Stream Image
+      operationId: streamStoryImage
+      parameters:
+      - name: story_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Story Id
+      - name: scene_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Scene Id
+      - name: expires
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Expires
+      - name: signature
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Signature
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security: []
 components:
   securitySchemes:
     bearerAuth:
@@ -4153,6 +4238,9 @@ components:
           nullable: true
         usage:
           $ref: '#/components/schemas/StoryUsage'
+        images:
+          $ref: '#/components/schemas/StoryImages'
+          nullable: true
       type: object
       required:
       - id
@@ -4186,6 +4274,7 @@ components:
           - bundled
           - folder
           - library
+          - ai
           title: Kind
         id:
           type: string
@@ -4234,6 +4323,7 @@ components:
           - bundled
           - folder
           - library
+          - ai
           title: Kind
         id:
           type: string
@@ -4252,6 +4342,7 @@ components:
           - bundled
           - folder
           - library
+          - ai
           title: Kind
         id:
           title: Id
@@ -4360,6 +4451,66 @@ components:
       - genres
       - lengths
       title: StoryGenres
+    StoryImageLink:
+      properties:
+        id:
+          type: integer
+          title: Id
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+      - id
+      - url
+      title: StoryImageLink
+    StoryImageLinks:
+      properties:
+        scenes:
+          items:
+            $ref: '#/components/schemas/StoryImageLink'
+          type: array
+          title: Scenes
+      type: object
+      required:
+      - scenes
+      title: StoryImageLinks
+    StoryImages:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        variant:
+          type: integer
+          title: Variant
+        scenes:
+          items:
+            $ref: '#/components/schemas/StorySceneImage'
+          type: array
+          title: Scenes
+      type: object
+      required:
+      - provider
+      - variant
+      - scenes
+      title: StoryImages
+    StoryImagesUsage:
+      properties:
+        seconds:
+          type: number
+          title: Seconds
+        drawn:
+          type: integer
+          title: Drawn
+        costUsd:
+          type: number
+          title: Costusd
+      type: object
+      required:
+      - seconds
+      - drawn
+      - costUsd
+      title: StoryImagesUsage
     StoryJobError:
       properties:
         code:
@@ -4431,6 +4582,10 @@ components:
         request:
           $ref: '#/components/schemas/StoryRenderSettings'
           nullable: true
+        progress:
+          title: Progress
+          type: number
+          nullable: true
         error:
           $ref: '#/components/schemas/StoryJobError'
           nullable: true
@@ -4480,6 +4635,10 @@ components:
           - none
           title: Titlecard
           default: title
+        newImages:
+          type: boolean
+          title: Newimages
+          default: false
       additionalProperties: false
       type: object
       required:
@@ -4551,6 +4710,23 @@ components:
       - visual_description
       - mood
       title: StoryScene
+    StorySceneImage:
+      properties:
+        id:
+          type: integer
+          title: Id
+        prompt:
+          type: string
+          title: Prompt
+        cached:
+          type: boolean
+          title: Cached
+      type: object
+      required:
+      - id
+      - prompt
+      - cached
+      title: StorySceneImage
     StorySceneTiming:
       properties:
         id:
@@ -4692,6 +4868,9 @@ components:
           nullable: true
         render:
           $ref: '#/components/schemas/StoryRenderUsage'
+          nullable: true
+        images:
+          $ref: '#/components/schemas/StoryImagesUsage'
           nullable: true
         totalCostUsd:
           type: number

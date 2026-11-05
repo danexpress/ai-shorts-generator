@@ -12,4 +12,5 @@ GENRE = Genre(
     moods=("low", "reflective", "rising", "triumphant"),
     order=30,
     default_background="ember",
+    image_style="warm golden-hour cinematic photography, hopeful light, shallow depth of field",
 )

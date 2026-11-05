@@ -59,7 +59,7 @@ node frontend/browser-smoke.cjs
    - **Voice:** pick an engine (unavailable ones are disabled, with the reason shown), a voice and a speed, which starts at the engine's default. Generation shows per-scene progress, then an audio player.
      - A voiceover over 60 s offers *Shorten script*.
      - Editing the narration marks the voice out of date.
-   - **Render:** pick a background (generated loops shown as colour swatches, your folder's loops, your uploads), music, caption style and title card (title, hook or none). Rendering shows progress, then the final preview, *Download MP4* and *Review & publish*. From publishing, *Back to your story* returns here.
+   - **Render:** pick a background (AI pictures, generated loops shown as colour swatches, your folder's loops, your uploads), music, caption style and title card (title, hook or none). With AI pictures you can tick *Draw new pictures*; rendering shows *Drawing scene pictures… n%*, and the scene thumbnails appear above the final preview. Rendering shows progress, then the final preview, *Download MP4* and *Review & publish*. From publishing, *Back to your story* returns here.
 3. **Stories:** listed in the sidebar with their status.
 
 While a voice or render runs, the page polls the story every 1.5 s, stops when you leave the page, and shows the server's readable error if the job fails. The mock backend answers story calls with `STORY_UNAVAILABLE`, because Story Mode needs the real script writer, voices and FFmpeg.

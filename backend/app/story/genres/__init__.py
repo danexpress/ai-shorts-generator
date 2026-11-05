@@ -21,6 +21,8 @@ class Genre:
     order: int = 100
     # Bundled background preselected for this genre (see app/story/visuals.py).
     default_background: str = "midnight"
+    # Visual style added to every AI image prompt in this genre (see app/story/images).
+    image_style: str = "cinematic film still, soft natural light, rich detail"
 
     def public(self) -> dict:
         return {

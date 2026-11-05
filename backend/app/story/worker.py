@@ -24,9 +24,11 @@ from ..social.db_models import RenderContext
 from ..store import DAY, oid
 from . import cache, music
 from .audio import AudioFailed
+from .images import ImageFailed, ImageUnavailable, build_image_providers
 from .render import StoryRenderPlan, render_story
+from .scene_images import generate_scene_images, scene_image_file
 from .tts import TTSFailed, TTSUnavailable, build_providers
-from .visuals import resolve
+from .visuals import SceneImagesBackground, resolve
 from .voice import VoiceRequest, generate_voice
 
 logger = logging.getLogger(__name__)
@@ -103,9 +105,18 @@ def story_project(db, record: StoryRecord, settings, now: int) -> ProjectRecord:
 
 
 class StoryWorker:
-    def __init__(self, database, settings, clock=time.time, providers=None, transcriber=None):
+    def __init__(
+        self,
+        database,
+        settings,
+        clock=time.time,
+        providers=None,
+        transcriber=None,
+        image_providers=None,
+    ):
         self.database, self.settings, self.clock = database, settings, clock
         self._providers = providers
+        self._image_providers = image_providers
         self._transcriber = transcriber
         self.owner = oid("sworker")[:40]
         self.pruned_at = None
@@ -115,6 +126,12 @@ class StoryWorker:
         if self._providers is None:
             self._providers = build_providers(self.settings)
         return self._providers
+
+    @property
+    def image_providers(self):
+        if self._image_providers is None:
+            self._image_providers = build_image_providers(self.settings)
+        return self._image_providers
 
     def transcriber(self):
         """Whisper for providers without timestamps, loaded only if ever needed."""
@@ -182,7 +199,7 @@ class StoryWorker:
             elif status == "voicing":
                 self.voice(job, attempt)
             else:
-                self.render(job)
+                self.render(job, attempt)
         except Abandoned:
             logger.info("Story %s %s request was replaced or deleted; discarded", story_id, status)
         except Exception:
@@ -285,16 +302,18 @@ class StoryWorker:
 
     # ---------- render ----------
 
-    def render(self, job):
+    def render(self, job, attempt: int = 1):
         story_id = job[0]
         ffmpeg = ffmpeg_path(self.settings.ffmpeg_binary, need_subtitles=True)
-        problem = None
+        problem, background = None, None
         with self.database.sessions() as db:
             record = self.owned(db, *job)
             document, user_id, title = record.document, record.userId, record.title
             settings = document["renderRequest"]
+            ai = settings["background"].get("kind") == "ai"
             try:
-                background = resolve(db, self.settings, user_id, settings["background"], ffmpeg)
+                if not ai:  # AI pictures are drawn below, outside the session
+                    background = resolve(db, self.settings, user_id, settings["background"], ffmpeg)
             except ApiError as exc:
                 problem = exc
         if problem:  # failed outside the read session: never write while it is open
@@ -311,6 +330,12 @@ class StoryWorker:
                     job, "MUSIC_UNAVAILABLE", "That music track is no longer available."
                 )
         script = document["script"]
+        images = None
+        if ai:
+            drawn = self.scene_pictures(job, attempt, document, settings["background"]["id"])
+            if drawn is None:
+                return  # failed or waiting to retry
+            images, background = drawn
         card = {"title": script["title"], "hook": script["hook"]}.get(settings["titleCard"])
         timeline = [
             {**scene, **timing}
@@ -338,12 +363,45 @@ class StoryWorker:
             temporary.unlink(missing_ok=True)
             return self.fail(job, "RENDER_FAILED", str(exc) or "The video could not be rendered.")
         try:
-            self.save_render(job, render_id, destination, result, title, script, document)
+            self.save_render(job, render_id, destination, result, title, script, document, images)
         except Abandoned:
             destination.unlink(missing_ok=True)
             raise
 
-    def save_render(self, job, render_id, destination, result, title, script, document):
+    def scene_pictures(self, job, attempt, document, provider_id):
+        """(images document, background) for AI pictures, or None after failing/retrying."""
+        provider = self.image_providers.get(provider_id)
+        reason = provider.unavailable_reason() if provider else "That image engine is not set up."
+        if reason:
+            self.fail(job, "BACKGROUND_UNAVAILABLE", reason)
+            return None
+        try:
+            images = generate_scene_images(
+                document["script"],
+                document["request"]["genre"],
+                provider,
+                self.settings,
+                job[0],
+                document.get("imageVariant", 0),
+                # Pictures are most of the work; the final encode is the last 10%.
+                on_progress=lambda value: self.progress(job, 0.9 * value),
+            )
+        except ImageUnavailable as exc:
+            logger.warning("Story %s pictures attempt %d: %s", job[0], attempt, exc)
+            if attempt >= MAX_ATTEMPTS:
+                self.fail(job, "IMAGES_UNAVAILABLE", str(exc))
+            else:
+                self.retry_later(job, attempt)
+            return None
+        except ImageFailed as exc:
+            self.fail(job, "IMAGE_FAILED", str(exc))
+            return None
+        files = [scene_image_file(self.settings, scene["key"]) for scene in images["scenes"]]
+        return images, SceneImagesBackground(files)
+
+    def save_render(
+        self, job, render_id, destination, result, title, script, document, images=None
+    ):
         now = self.now()
         with self.database.transaction() as db:
             record = self.owned(db, *job)
@@ -389,6 +447,10 @@ class StoryWorker:
                 "render",
                 {"seconds": result["seconds"], "costUsd": 0.0},
             )
+            if images:
+                usage = add_cost(
+                    usage, "images", {key: images[key] for key in ("seconds", "drawn", "costUsd")}
+                )
             record.document = {
                 **record.document,
                 "background": settings["background"],
@@ -399,6 +461,7 @@ class StoryWorker:
                     "titleCard": settings["titleCard"],
                 },
                 "lastRenderId": render_id,
+                **({"images": images} if images else {}),
                 "renderError": None,
                 "usage": usage,
             }

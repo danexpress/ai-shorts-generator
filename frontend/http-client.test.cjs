@@ -981,3 +981,34 @@ test('story errors stay on screen and a stale story is reloaded', async t => {
   await v.shorten();
   assert.deepEqual(plain(calls.filter(c => c[0] === 'regenerate').map(c => c[2])), [{ revision: 10, shorten: true }]);
 });
+
+test('AI pictures: new-pictures option, drawing progress and scene thumbnails', async t => {
+  const calls = [];
+  const api = storyApi(calls);
+  api.listStoryAssets = async () => ({ backgrounds: [{ kind: 'ai', id: 'flux', label: 'AI pictures', description: 'FLUX.1 schnell (free, runs locally)' }], music: [], captionPresets: [{ id: 'clean-bold', label: 'Clean Bold' }] });
+  api.getStoryImageLinks = async (id) => { calls.push(['links', id]); return { scenes: [{ id: 1, url: '/v1/story-images/sty_1/1?s' }, { id: 2, url: '/v1/story-images/sty_1/2?s' }] }; };
+  const page = component({ ...S, createApi: () => api });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session });
+  api.getStory = async () => storyFixture({ revision: 3, status: 'voiced', voice: VOICE });
+  await page.openStory('sty_1');
+  await page.loadStoryOptions();
+  let v = page.renderVals().story;
+  v.setRender({ background: { kind: 'ai', id: 'flux' }, newImages: true });
+  await page.renderVals().story.render();
+  const body = calls.find(c => c[0] === 'render')[2];
+  assert.deepEqual(plain(body.background), { kind: 'ai', id: 'flux' });
+  assert.equal(body.newImages, true);
+  assert.equal(page.state.story.renderChoice.newImages, false);  // one-off: the next render reuses pictures
+  api.getStory = async () => storyFixture({ revision: 5, status: 'rendering', voice: VOICE, renderJob: { request: null, progress: 0.45, error: null } });
+  await page.reloadStory();
+  assert.equal(page.state.story.current.renderJob.progress, 0.45);
+  const images = { provider: 'flux', variant: 1, scenes: [{ id: 1, prompt: 'A lighthouse.', cached: false }, { id: 2, prompt: 'Rocks.', cached: true }] };
+  api.getStory = async () => storyFixture({ revision: 6, status: 'rendered', voice: VOICE, images, usage: { script: null, voice: null, render: { seconds: 3, costUsd: 0 }, images: { seconds: 120.5, drawn: 1, costUsd: 0 }, totalCostUsd: 0 } });
+  await page.reloadStory();
+  await new Promise(resolve => setImmediate(resolve));
+  v = page.renderVals().story;
+  assert.deepEqual(plain(v.imageLinks.map(l => l.url)), ['http://api.test/v1/story-images/sty_1/1?s', 'http://api.test/v1/story-images/sty_1/2?s']);
+  assert.match(v.costLine, /^Pictures 120\.5 s · 1 drawn · free · Render 3\.0 s — total free$/);
+});

@@ -32,6 +32,9 @@ kokoro = [
     "en-core-web-sm",
     "kokoro>=0.9.4",
 ]
+images = [
+    "mflux>=0.24 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
 
 [dependency-groups]
 dev = [

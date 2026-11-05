@@ -13,4 +13,5 @@ GENRE = Genre(
     moods=("grounded", "tense", "dramatic", "reflective"),
     order=40,
     default_background="forest",
+    image_style="painterly historical illustration, period-accurate clothing and architecture, oil painting texture",
 )

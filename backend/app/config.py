@@ -106,6 +106,32 @@ class Settings:
     story_music_dir: str = field(
         default_factory=lambda: os.environ.get("STORY_MUSIC_DIR", "").strip()
     )
+    # Story Mode v2 AI scene images: flux (local, free) | openai (hosted) | demo.
+    story_image_provider: str = field(
+        default_factory=lambda: os.environ.get("STORY_IMAGE_PROVIDER", "flux").strip().lower()
+    )
+    flux_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "FLUX_MODEL", "mflux-community/flux-1-schnell-mflux-q4"
+        ).strip()
+    )
+    # 576x1024 draws about 3x faster than 768x1344 with little visible loss behind captions.
+    flux_size: str = field(default_factory=lambda: os.environ.get("FLUX_SIZE", "576x1024").strip())
+    openai_api_key: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_API_KEY", "").strip()
+    )
+    openai_image_model: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2").strip()
+    )
+    openai_image_size: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_IMAGE_SIZE", "1024x1536").strip()
+    )
+    openai_image_quality: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_IMAGE_QUALITY", "medium").strip()
+    )
+    openai_cost_per_image: float = field(
+        default_factory=lambda: float(os.environ.get("OPENAI_COST_PER_IMAGE", "0") or 0)
+    )
     # Story cache entries (scripts, scene audio, generated loops) unused this long are pruned.
     story_cache_days: float = field(
         default_factory=lambda: float(os.environ.get("STORY_CACHE_DAYS", "30") or 30)

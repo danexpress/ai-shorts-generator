@@ -12,4 +12,5 @@ GENRE = Genre(
     moods=("light", "awkward", "chaotic", "punchline"),
     order=50,
     default_background="deep-sea",
+    image_style="bright colorful stylized 3D animation still, expressive, playful lighting",
 )

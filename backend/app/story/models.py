@@ -12,7 +12,7 @@ StoryStatus = Literal[
     "draft", "voicing", "voiced", "voice_failed", "rendering", "rendered", "render_failed"
 ]
 TitleCard = Literal["title", "hook", "none"]
-BackgroundKind = Literal["bundled", "folder", "library"]
+BackgroundKind = Literal["bundled", "folder", "library", "ai"]
 
 
 class StoryCreateRequest(RequestModel):
@@ -152,6 +152,8 @@ class StoryRenderRequest(RequestModel):
     captionPreset: str = Field(default="clean-bold", max_length=40)
     captions: bool = True
     titleCard: TitleCard = "title"
+    # AI pictures only: draw new pictures instead of reusing the last ones.
+    newImages: bool = False
 
 
 class StoryBackgroundRef(BaseModel):
@@ -171,7 +173,35 @@ class StoryRenderSettings(BaseModel):
 
 class StoryRenderJob(BaseModel):
     request: StoryRenderSettings | None
+    progress: float | None = None
     error: StoryJobError | None
+
+
+class StorySceneImage(BaseModel):
+    id: int
+    prompt: str
+    cached: bool
+
+
+class StoryImages(BaseModel):
+    provider: str
+    variant: int
+    scenes: list[StorySceneImage]
+
+
+class StoryImageLink(BaseModel):
+    id: int
+    url: str
+
+
+class StoryImageLinks(BaseModel):
+    scenes: list[StoryImageLink]
+
+
+class StoryImagesUsage(BaseModel):
+    seconds: float
+    drawn: int
+    costUsd: float
 
 
 class StoryAsset(BaseModel):
@@ -224,6 +254,7 @@ class StoryUsage(BaseModel):
     script: StoryScriptUsage | None
     voice: StoryVoiceUsage | None
     render: StoryRenderUsage | None
+    images: StoryImagesUsage | None = None
     totalCostUsd: float
 
 
@@ -263,6 +294,7 @@ class Story(BaseModel):
     renderSettings: StoryRenderSettings
     lastRenderId: str | None
     usage: StoryUsage
+    images: StoryImages | None = None
 
 
 class StorySummary(BaseModel):

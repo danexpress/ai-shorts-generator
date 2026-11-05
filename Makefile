@@ -4,9 +4,10 @@ UV ?= uv
 HOST ?= 127.0.0.1
 PORT ?= 8000
 FRONTEND_PORT ?= 3000
-# Optional backend extras kept installed by `make install` / `make run`. Kokoro is the
-# default Story Mode voice; use EXTRAS= for a smaller install, or add --extra align.
-EXTRAS ?= --extra kokoro
+# Optional backend extras kept installed by `make install` / `make run`: Kokoro (the
+# default Story Mode voice) and FLUX via mflux (AI scene pictures, Apple silicon only).
+# Use EXTRAS= for a smaller install, or add --extra align.
+EXTRAS ?= --extra kokoro --extra images
 BACKEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))backend
 FRONTEND_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))frontend
 

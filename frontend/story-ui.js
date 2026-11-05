@@ -427,6 +427,22 @@
           ),
         ),
         h("p", { className: "small muted" }, "Add your own loops to the server's backgrounds folder (STORY_BACKGROUNDS_DIR); your uploaded videos appear here too."),
+        c.background?.kind === "ai" &&
+          h(
+            "div",
+            { className: "stack tight" },
+            h(
+              "p",
+              { className: "small muted" },
+              "Each scene gets its own picture from its “What we see” description, with a slow pan or zoom. Pictures are kept: re-rendering reuses them, and editing one scene’s description redraws only that scene. Local FLUX can take a minute or more per new picture.",
+            ),
+            h(
+              "label",
+              { className: "check" },
+              h("input", { type: "checkbox", checked: !!c.newImages, disabled: rendering, onChange: (e) => s.setRender({ newImages: e.target.checked }) }),
+              "Draw new pictures for every scene",
+            ),
+          ),
       ),
       h(
         "div",
@@ -473,7 +489,16 @@
           ].map(([id, label]) => ({ id, label, pressed: String(c.titleCard === id), disabled: rendering || !c.captions, pick: () => s.setRender({ titleCard: id }) })),
         }),
       ),
-      rendering && h(Progress, { value: null, label: "Rendering your Short… usually under 10 seconds." }),
+      rendering &&
+        h(Progress, {
+          value: s.current.renderJob.progress,
+          label:
+            s.current.renderJob.progress == null
+              ? "Rendering your Short… usually under 10 seconds."
+              : s.current.renderJob.progress < 0.9
+                ? `Drawing scene pictures… ${pct(s.current.renderJob.progress / 0.9)}`
+                : "Pictures done. Rendering your Short…",
+        }),
       s.current.renderJob.error && h(Notice, { kind: "error" }, s.current.renderJob.error.message),
       h(
         "div",
@@ -485,6 +510,14 @@
           "div",
           { className: "story-result stack" },
           h("h3", null, "Final preview"),
+          s.imageLinks.length > 0 &&
+            h(
+              "div",
+              { className: "scene-thumbs", "aria-label": "Scene pictures" },
+              s.imageLinks.map((link) =>
+                h("figure", { key: link.id }, h("img", { src: link.url, alt: `Scene ${link.id} picture`, loading: "lazy" }), h("figcaption", { className: "small muted" }, `Scene ${link.id}`)),
+              ),
+            ),
           h(VideoPreview, { url: latest.playUrl, label: "Rendered story Short" }),
           h(
             "div",
