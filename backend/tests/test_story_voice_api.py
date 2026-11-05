@@ -42,12 +42,18 @@ def get(client, headers, item):
     return client.get(f"/v1/stories/{item['id']}", headers=headers).json()
 
 
-def test_voice_is_generated_in_the_background_and_can_be_played(client, headers, voices, clock):
+def test_voice_is_generated_in_the_background_and_can_be_played(
+    client, headers, voices, clock, app
+):
     _demo, worker = voices
     listed = check(client.get("/v1/story-voices", headers=headers), "/v1/story-voices", "get")
     providers = {p["id"]: p for p in listed["providers"]}
     assert listed["defaultProvider"] == "demo" and providers["demo"]["available"]
     assert providers["elevenlabs"]["available"] is False and providers["elevenlabs"]["reason"]
+    app.state.story.settings = replace(app.state.story.settings, story_tts_provider="kokoro")
+    hidden = client.get("/v1/story-voices", headers=headers).json()
+    assert "demo" not in [p["id"] for p in hidden["providers"]]  # offline tones stay hidden
+    app.state.story.settings = replace(app.state.story.settings, story_tts_provider="demo")
 
     item = story(client, headers)
     queued = check(ask_voice(client, headers, item), "/v1/stories/{id}/voice", "post")

@@ -284,12 +284,12 @@ test('page uses the HTTP client, password form state and server feature flags', 
   assert.equal(page.state.route, 'dashboard');
   assert.equal(page.state.loginPassword, '');
   // The URL tab is always visible; with import off it cannot start a project.
-  assert.equal(page.renderVals().tabs.length, 2);
+  assert.equal(page.renderVals().tabs.length, 3);  // upload, URL, story
   page.setNp({ tab: 'url', url: 'https://youtu.be/abcdefghijk', rights: true });
   assert.equal(page.renderVals().urlImportOff, true);
   assert.equal(page.renderVals().cannotStart, true);
   page.setState({ me: { ...session, features: { youtubeImport: true } } });
-  assert.equal(page.renderVals().tabs.length, 2);
+  assert.equal(page.renderVals().tabs.length, 3);  // upload, URL, story
   assert.equal(page.renderVals().cannotStart, false);
   page.setNp({ tab: 'upload', url: '', rights: false });
   page.setState({ projects: [{ id: 'private' }], transcript: { segments: [] } });
@@ -331,7 +331,7 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   assert.ok(fs.existsSync(python), 'Run make install before running frontend integration tests.');
   const dataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'shorts-http-test-'));
   const databaseUrl = 'sqlite+pysqlite:///' + path.join(dataDirectory, 'test.db');
-  const server = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '0'], { cwd: backend, env: { ...process.env, DATABASE_URL: databaseUrl, SEED_DEMO_DATA: 'true' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const server = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '0'], { cwd: backend, env: { ...process.env, DATABASE_URL: databaseUrl, SEED_DEMO_DATA: 'true', MEDIA_DIR: path.join(dataDirectory, 'media'), STORY_MODEL: 'demo', STORY_TTS_PROVIDER: 'demo' }, stdio: ['ignore', 'ignore', 'pipe'] });
   t.after(async () => {
     if (server.exitCode === null) {
       const exited = new Promise(resolve => server.once('exit', resolve));
@@ -386,7 +386,7 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   await page.loadTranscript(ready.id);
   assert.ok(page.state.clipsRes.clips.length > 0);
   assert.ok(page.state.transcript.segments.length > 0);
-  assert.equal(page.renderVals().tabs.length, 2);
+  assert.equal(page.renderVals().tabs.length, 3);  // upload, URL, story
   assert.equal(page.renderVals().urlImportOff, true);  // the isolated backend has import off
   page.setState({ pendingFile: new Blob([new Uint8Array(12)], { type: 'video/mp4' }) });
   page.setNp({ source: { fileName: 'demo.mp4', title: 'HTTP integration demo', mimeType: 'video/mp4', sizeBytes: 12, durationSec: 300, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true } });
@@ -401,6 +401,27 @@ test('page and HTTP client work with a live isolated FastAPI backend', { timeout
   assert.equal((await mediaResponse.arrayBuffer()).byteLength, 5);
   await page.cancel();
   assert.equal(page.state.status.status, 'canceled');
+  // Story Mode against the real API (offline demo script writer and voice).
+  page.newStory();
+  await page.loadStoryOptions();
+  assert.equal(page.renderVals().story.genres[0].id, 'mystery');
+  page.renderVals().story.setForm({ topic: 'a lighthouse keeper who finds a message in a bottle', seconds: 30 });
+  await page.createStory();
+  assert.equal(page.state.route, 'story');
+  const written = page.state.story.current;
+  assert.equal(written.status, 'draft');
+  assert.ok(written.script.scenes.length >= 3 && written.warnings.length === 0);
+  page.renderVals().story.editScene(0, 'narration', written.script.scenes[0].narration + ' It was cold.');
+  await page.renderVals().story.saveScript();
+  assert.equal(page.state.story.current.scriptSource, 'edited');
+  assert.equal(page.state.story.dirty, false);
+  assert.equal(page.state.story.voiceChoice.provider, 'demo');
+  await page.renderVals().story.generateVoice();
+  assert.equal(page.state.story.current.status, 'voicing');  // the worker would pick it up
+  page.go('stories');
+  await page.loadStories();
+  assert.deepEqual(page.state.story.list.map(s => s.id), [written.id]);
+  await page.api.deleteStory(written.id);
   await page.signOut();
   assert.equal(page.state.route, 'login');
   assert.equal(page.state.projects.length, 0);
@@ -788,4 +809,172 @@ test('Instagram Reels are composed with caption, hashtags and the feed option', 
   assert.equal(target.platform, 'instagram');
   assert.equal(target.social_account_id, 'acc-ig');
   assert.equal(JSON.stringify(target.instagram), JSON.stringify({ caption: 'Hire for tomorrow', hashtags: ['#hiring'], share_to_feed: false }));
+});
+
+test('every client endpoint exists in the API contract with the same method', () => {
+  const spec = fs.readFileSync(path.join(__dirname, '../openapi.yaml'), 'utf8');
+  const operations = new Set();
+  let current = null;
+  for (const line of spec.split('\n')) {
+    const pathMatch = line.match(/^  (\/v1\/\S+):$/);
+    if (pathMatch) { current = pathMatch[1].replace(/\{\w+\}/g, '{}'); continue; }
+    const verb = line.match(/^    (get|post|put|patch|delete):$/);
+    if (verb && current) operations.add(verb[1].toUpperCase() + ' ' + current);
+    if (/^\S/.test(line)) current = null;
+  }
+  const missing = S.ENDPOINTS.filter(([, verb, route]) => !operations.has(verb + ' ' + route.replace(/\{\w+\}/g, '{}')));
+  assert.deepEqual(missing, []);
+});
+
+// Objects made inside the page's VM realm compare as plain JSON.
+const plain = (x) => JSON.parse(JSON.stringify(x));
+
+// A story as the API returns it, at a given status/revision.
+function storyFixture(patch = {}) {
+  const scenes = [1, 2, 3].map(id => ({ id, narration: `Scene ${id} line one. Line two.`, visual_description: 'Waves.', mood: 'eerie' }));
+  return {
+    id: 'sty_1', title: 'The Second Bottle', status: 'draft', revision: 1, createdAt: 1, updatedAt: 1,
+    genre: 'mystery', targetSeconds: 30, tone: '', topic: 'a bottle', story: null,
+    script: { title: 'The Second Bottle', hook: 'Scene 1 line one.', scenes, estimated_seconds: 30 },
+    scriptSource: 'generated', wordCount: 18, wordBudget: [65, 75], warnings: [],
+    voice: null, voiceJob: { request: null, progress: null, error: null },
+    renderJob: { request: null, error: null },
+    renderSettings: { background: { kind: 'bundled', id: 'midnight', name: null, projectId: null }, music: null, captionPreset: 'clean-bold', captions: true, titleCard: 'title' },
+    lastRenderId: null, ...patch,
+  };
+}
+const VOICE = { provider: 'kokoro', voice: 'af_heart', speed: 0.8, durationSec: 31.2, tooLong: false, scenes: [], words: [], timingSources: ['provider'], characters: 300, costUsd: 0, cachedScenes: 0, loudness: { inputLufs: -25, outputLufs: -14.3 }, stale: false };
+
+function storyApi(calls) {
+  const record = (name, result) => async (...args) => { calls.push([name, ...args]); return typeof result === 'function' ? result(...args) : result; };
+  return {
+    listStoryGenres: record('genres', { genres: [{ id: 'mystery', label: 'Mystery', defaultTone: 'quiet', moods: [], defaultBackground: 'midnight' }], lengths: [30, 45, 60] }),
+    listStoryVoices: record('voices', { defaultProvider: 'kokoro', providers: [
+      { id: 'kokoro', label: 'Kokoro', available: true, reason: null, speedRange: [0.7, 1.4], defaultSpeed: 0.8, voices: [{ id: 'af_heart', label: 'Heart', description: '' }, { id: 'bm_fable', label: 'Fable', description: '' }] },
+      { id: 'elevenlabs', label: 'ElevenLabs', available: false, reason: 'Set ELEVENLABS_API_KEY.', speedRange: [0.7, 1.2], defaultSpeed: 1, voices: [] },
+    ] }),
+    listStoryAssets: record('assets', { backgrounds: [{ kind: 'bundled', id: 'midnight', label: 'Midnight', description: 'Generated loop' }, { kind: 'library', id: 'prj_1', label: 'Episode', description: 'Your upload' }], music: [], captionPresets: [{ id: 'clean-bold', label: 'Clean Bold' }] }),
+    createStory: record('create', () => storyFixture()),
+    getStory: record('get', () => storyFixture()),
+    listStoryRenders: record('renders', { renders: [] }),
+    updateStoryScript: record('save', (id, body) => storyFixture({ revision: body.revision + 1, script: body.script, scriptSource: 'edited' })),
+    regenerateStoryScript: record('regenerate', (id, body) => storyFixture({ revision: body.revision + 1, warnings: [] })),
+    requestStoryVoice: record('voice', (id, body) => storyFixture({ revision: body.revision + 1, status: 'voicing', voiceJob: { request: { provider: body.provider, voice: body.voice, speed: body.speed }, progress: 0, error: null } })),
+    getStoryVoicePlayback: record('playback', { url: '/v1/story-audio/sty_1?expires=1&signature=s', expiresAt: 1 }),
+    renderStory: record('render', (id, body) => storyFixture({ revision: body.revision + 1, status: 'rendering', voice: VOICE })),
+    listStories: record('list', { stories: [] }),
+  };
+}
+
+test('story tab writes, edits, voices and renders a story with clear step states', async t => {
+  const calls = [];
+  const api = storyApi(calls);
+  const page = component({ ...S, createApi: () => api });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session });
+  page.newStory();
+  await page.loadStoryOptions();
+  let v = page.renderVals();
+  assert.equal(page.state.np.tab, 'story');
+  assert.equal(v.isStoryTab, true);
+  assert.equal(v.story.canCreate, false);  // no topic yet
+  v.story.setForm({ topic: 'a bottle', seconds: 30, tone: '  dry ' });
+  assert.equal(page.renderVals().story.canCreate, true);
+  assert.deepEqual(plain(page.state.story.voiceChoice), { provider: 'kokoro', voice: 'af_heart', speed: 0.8 });  // provider default speed
+
+  await page.createStory();
+  assert.deepEqual(plain(calls.find(c => c[0] === 'create')[1]), { genre: 'mystery', targetSeconds: 30, tone: 'dry', topic: 'a bottle' });
+  assert.equal(page.state.route, 'story');
+  v = page.renderVals().story;
+  assert.deepEqual(plain(v.steps.map(s => s.state)), ['done', 'current', 'todo']);
+  assert.equal(v.canVoice, true);
+  assert.equal(v.canRender, false);
+  assert.match(v.wordLine, /^18 words · budget 65–75 · about \d+ s$/);
+
+  // Unsaved edits block the voice until saved; saving sends the revision and the draft.
+  v.editScene(1, 'narration', 'A brand new line here.');
+  v = page.renderVals().story;
+  assert.equal(v.dirty, true);
+  assert.equal(v.canVoice, false);
+  assert.equal(v.steps[0].detail, 'Unsaved changes');
+  await v.saveScript();
+  const saved = calls.find(c => c[0] === 'save');
+  assert.equal(saved[2].revision, 1);
+  assert.equal(saved[2].script.scenes[1].narration, 'A brand new line here.');
+  assert.equal(page.state.story.dirty, false);
+
+  // Voice: queued, followed while generating, then playable.
+  await page.renderVals().story.generateVoice();
+  assert.deepEqual(plain(calls.find(c => c[0] === 'voice')[2]), { revision: 2, provider: 'kokoro', voice: 'af_heart', speed: 0.8 });
+  assert.equal(page.state.story.current.status, 'voicing');
+  assert.equal(page.renderVals().story.steps[1].detail, 'Generating…');
+  api.getStory = async () => storyFixture({ revision: 4, status: 'voiced', voice: VOICE });
+  await page.reloadStory();
+  await new Promise(resolve => setImmediate(resolve));
+  v = page.renderVals().story;
+  assert.equal(page.state.story.audioUrl, 'http://api.test/v1/story-audio/sty_1?expires=1&signature=s');
+  assert.deepEqual(plain(v.steps.map(s => s.state)), ['done', 'done', 'current']);
+  assert.equal(v.canRender, true);
+
+  // Render with the chosen background, then the result opens Review & publish.
+  v.setRender({ background: { kind: 'library', id: 'prj_1' }, titleCard: 'hook' });
+  await page.renderVals().story.render();
+  const rendered = calls.find(c => c[0] === 'render')[2];
+  assert.deepEqual(plain(rendered.background), { kind: 'library', id: 'prj_1' });
+  assert.equal(rendered.titleCard, 'hook');
+  assert.equal(page.state.story.current.status, 'rendering');
+  const short = { id: 'rnd_1', url: '/v1/rendered/rnd_1?x', downloadUrl: '/v1/rendered/rnd_1?x&download=true', filename: 's.mp4', durationSec: 32, createdAt: 2, expiresAt: 3 };
+  api.getStory = async () => storyFixture({ revision: 6, status: 'rendered', voice: VOICE, lastRenderId: 'rnd_1' });
+  api.listStoryRenders = async () => ({ renders: [short] });
+  await page.reloadStory();
+  await new Promise(resolve => setImmediate(resolve));
+  v = page.renderVals().story;
+  assert.equal(v.renders[0].playUrl, 'http://api.test/v1/rendered/rnd_1?x');
+  assert.equal(v.renders[0].url, 'http://api.test/v1/rendered/rnd_1?x');  // Review & publish plays result.url
+  assert.deepEqual(plain(v.steps.map(s => s.state)), ['done', 'done', 'done']);
+  api.listSocialAccounts = async () => ({ accounts: [], platforms: [] });
+  api.getSocialCopy = async () => ({ copy: {} });
+  api.getPublishingHistory = async () => [];
+  await v.publish(v.renders[0]);
+  assert.equal(page.state.route, 'publish');
+  assert.equal(page.state.result.storyId, 'sty_1');
+  page.renderVals().publishBack();
+  assert.equal(page.state.route, 'story');
+});
+
+test('story errors stay on screen and a stale story is reloaded', async t => {
+  const calls = [];
+  const api = storyApi(calls);
+  const page = component({ ...S, createApi: () => api });
+  t.after(() => page.componentWillUnmount());
+  page.componentDidMount();
+  page.setState({ me: session });
+  api.createStory = async () => { throw new S.ApiError('SCRIPT_FAILED', 'Claude couldn’t write a usable script. Try again or rephrase the topic.', 422); };
+  page.newStory();
+  page.renderVals().story.setForm({ topic: 'a bottle' });
+  await page.createStory();
+  assert.equal(page.state.route, 'new');
+  assert.match(page.state.story.createError, /rephrase the topic/);
+  assert.equal(page.state.story.creating, false);
+
+  await page.openStory('sty_1');
+  api.updateStoryScript = async () => { throw new S.ApiError('STALE_REVISION', 'This story changed in another tab.', 409); };
+  page.renderVals().story.editField('title', 'Mine');
+  let reloaded = 0;
+  api.getStory = async () => { reloaded++; return storyFixture({ revision: 9 }); };
+  await page.renderVals().story.saveScript();
+  assert.match(page.state.story.scriptError, /another tab/);
+  assert.equal(reloaded, 1);
+  assert.equal(page.state.story.draft.title, 'Mine');  // the creator's edit is kept
+  assert.equal(page.state.story.current.revision, 9);
+
+  // Over-length voice offers a one-click shorten.
+  api.getStory = async () => storyFixture({ revision: 10, status: 'voiced', voice: { ...VOICE, durationSec: 63, tooLong: true }, warnings: ['The voiceover runs 63 seconds; Shorts must stay under 60.'] });
+  page.storyState({ dirty: false });
+  await page.reloadStory();
+  const v = page.renderVals().story;
+  assert.equal(v.canShorten, true);
+  await v.shorten();
+  assert.deepEqual(plain(calls.filter(c => c[0] === 'regenerate').map(c => c[2])), [{ revision: 10, shorten: true }]);
 });

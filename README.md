@@ -1,6 +1,6 @@
 # AI Shorts Generator
 
-Turns long videos into vertical Shorts. It transcribes uploads locally with Whisper, has Claude pick the most engaging moments, and renders 1080×1920 clips with karaoke captions. Creators sign in with Google, then publish to YouTube, TikTok, X and Instagram now or on a schedule.
+Turns long videos into vertical Shorts. It transcribes uploads locally with Whisper, has Claude pick the most engaging moments, and renders 1080×1920 clips with karaoke captions. **Story Mode** turns a topic or a pasted story into a narrated Short: a Claude-written script, a Kokoro or ElevenLabs voiceover, a background loop, captions and optional music. Creators sign in with Google, then publish to YouTube, TikTok, X and Instagram now or on a schedule.
 
 ## Quick start
 
@@ -17,7 +17,7 @@ Set `ANTHROPIC_API_KEY` for highlight detection, or `HIGHLIGHT_MODEL=demo` to tr
 
 | Topic | Where |
 | --- | --- |
-| Running the backend, Google Sign-In, account deletion, transcription, captions, highlight detection | [backend/README.md](backend/README.md) |
+| Running the backend, Google Sign-In, account deletion, transcription, captions, highlight detection, Story Mode (adding voices and genres) | [backend/README.md](backend/README.md) |
 | Frontend structure and browser tests | [frontend/README.md](frontend/README.md) |
 | Social publishing: developer app setup for each platform (redirect URIs, scopes, env vars), platform reviews, scheduling, quotas, security | [docs/social-publishing.md](docs/social-publishing.md) |
 | Environment templates | [backend/.env.example](backend/.env.example), [backend/.env.social.example](backend/.env.social.example) |

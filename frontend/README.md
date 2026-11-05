@@ -46,8 +46,26 @@ node frontend/browser-smoke.cjs
 
 `CHROME_PATH` overrides the default macOS Chrome executable. `FRONTEND_TEST_URL` and `SCREENSHOT_DIR` can override the frontend URL and screenshot directory. Screenshots and test media should stay outside the repository.
 
+## Story Mode
+
+`story-ui.js` holds the Story screens; the page controller owns their state and API calls (`storyView()` in the `.dc.html`).
+
+1. **Start:** New Project → **Story**. Choose *Write from a topic* or *Paste a story*, then pick a genre, a length (30/45/60 s) and an optional tone. *Write script* waits about 20 s for Claude and opens the story.
+2. **Editor:** a three-step page whose stepper shows *Script → Voice → Render* as done, current or still to do.
+   - **Script:** edit the title, hook and each scene's narration, visuals and mood. Word count, budget and estimated length update as you type, and timing warnings come from the server.
+     - Unsaved edits block the voice step.
+     - *Write a new version* and *Shorten script* ask Claude again.
+     - If the story changed in another tab, the save is refused and the latest version is reloaded, keeping your edits.
+   - **Voice:** pick an engine (unavailable ones are disabled, with the reason shown), a voice and a speed, which starts at the engine's default. Generation shows per-scene progress, then an audio player.
+     - A voiceover over 60 s offers *Shorten script*.
+     - Editing the narration marks the voice out of date.
+   - **Render:** pick a background (generated loops shown as colour swatches, your folder's loops, your uploads), music, caption style and title card (title, hook or none). Rendering shows progress, then the final preview, *Download MP4* and *Review & publish*. From publishing, *Back to your story* returns here.
+3. **Stories:** listed in the sidebar with their status.
+
+While a voice or render runs, the page polls the story every 1.5 s, stops when you leave the page, and shows the server's readable error if the job fails. The mock backend answers story calls with `STORY_UNAVAILABLE`, because Story Mode needs the real script writer, voices and FFmpeg.
+
 ## Social publishing
 
 `social-ui.js` contains Social Accounts, the review/editor screen and shared publishing history. The page controller and HTTP client handle OAuth popup validation, cached/edited copy, explicit approval, real batch polling and failed-only retries. Settings → Social Accounts manages connections; rendered Shorts link to **Review & publish**. Native YouTube, TikTok, X and Instagram drafts are separate, and posts can be published now or scheduled. No platform is selected automatically. TikTok settings come from live creator info, with no initial privacy choice and separate required consent. AI generation asks the creator to confirm the saved transcript first.
 
-Configure platform credentials/flags, a copy model and the worker as described in [social publishing setup](../docs/social-publishing.md). `social-browser-smoke.cjs` adds mocked provider publishing checks to the optional browser regression; no external content is posted.
+Configure platform credentials/flags, a copy model and the worker as described in [social publishing setup](../docs/social-publishing.md). `social-browser-smoke.cjs` adds mocked provider publishing checks to the optional browser regression; no external content is posted. `http-client.test.cjs` covers the Story controller flow against a fake API and a live isolated backend (`STORY_MODEL=demo`, `STORY_TTS_PROVIDER=demo`), and checks that every client endpoint exists in `openapi.yaml`.

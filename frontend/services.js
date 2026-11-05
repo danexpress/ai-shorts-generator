@@ -73,6 +73,17 @@
     RENDERER_UNAVAILABLE: 'Video rendering is not available on this backend yet.',
     RENDER_FAILED: 'The Short could not be rendered. Check the source video and try again.',
     INVALID_STATE: 'That action isn’t available right now.',
+    STORY_UNAVAILABLE: 'Story Mode needs the connected backend.',
+    SCRIPT_FAILED: 'Claude couldn’t write a usable script. Try again or rephrase the topic.',
+    STORY_MODEL_UNAVAILABLE: 'The script writer is unavailable right now. Try again in a moment.',
+    INVALID_SCRIPT: 'Every scene needs narration, and the title and hook can’t be empty.',
+    STALE_REVISION: 'This story changed in another tab. Reload it to see the latest version.',
+    STORY_BUSY: 'Wait for the current step to finish.',
+    VOICE_UNAVAILABLE: 'This voice engine isn’t available right now.',
+    VOICE_REQUIRED: 'Generate the voice before rendering.',
+    VOICE_STALE: 'The script changed since the voice was made. Generate the voice again.',
+    BACKGROUND_UNAVAILABLE: 'That background is no longer available. Pick another.',
+    MUSIC_UNAVAILABLE: 'That music track is no longer available.',
     NETWORK_ERROR: 'Can’t reach the server. Check your connection.',
     SERVER_ERROR: 'Something went wrong on our side. Try again.',
   };
@@ -103,6 +114,20 @@
     ['reschedulePublishBatch', 'PATCH', '/v1/publish-batches/{id}'],
     ['cancelPublishBatch', 'POST', '/v1/publish-batches/{id}/cancel'],
     ['getPublishingHistory', 'GET', '/v1/renders/{id}/publishing-history'],
+
+    ['listStoryGenres', 'GET', '/v1/story-genres'],
+    ['listStoryVoices', 'GET', '/v1/story-voices'],
+    ['listStoryAssets', 'GET', '/v1/story-assets'],
+    ['listStories', 'GET', '/v1/stories'],
+    ['createStory', 'POST', '/v1/stories'],
+    ['getStory', 'GET', '/v1/stories/{id}'],
+    ['deleteStory', 'DELETE', '/v1/stories/{id}'],
+    ['updateStoryScript', 'PUT', '/v1/stories/{id}/script'],
+    ['regenerateStoryScript', 'POST', '/v1/stories/{id}/script/regenerate'],
+    ['requestStoryVoice', 'POST', '/v1/stories/{id}/voice'],
+    ['getStoryVoicePlayback', 'POST', '/v1/stories/{id}/voice/playback'],
+    ['renderStory', 'POST', '/v1/stories/{id}/render'],
+    ['listStoryRenders', 'GET', '/v1/stories/{id}/renders'],
 
     ['listSocialAccounts', 'GET', '/v1/social-accounts'],
     ['connectSocialAccount', 'GET', '/v1/social-accounts/{id}/connect'],
@@ -902,6 +927,9 @@
     api.getCaptions = api.saveCaptions = () => op(() => { requireUser(); throw new ApiError('CAPTIONS_UNAVAILABLE', null, 503); });
 
     for (const method of ['getSocialCopy','generateSocialCopy','regenerateSocialCopy','saveSocialCopy','getTikTokCreatorInfo','publishRender','getPublishBatch','retryPublishJob','reschedulePublishBatch','cancelPublishBatch','getPublishingHistory']) api[method] = () => op(() => { requireUser(); throw new ApiError('SOCIAL_UNAVAILABLE', 'Social publishing needs a configured backend.', 503); });
+
+    // Story Mode needs the real script writer, voices and FFmpeg: the mock only says so.
+    for (const method of API_METHODS.filter(m => /Stor(y|ies)/.test(m))) api[method] = () => op(() => { requireUser(); throw new ApiError('STORY_UNAVAILABLE', null, 503); });
 
     // Test/demo hooks — deliberately outside the API contract.
     Object.defineProperty(api, '_mock', {

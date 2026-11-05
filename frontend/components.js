@@ -169,11 +169,14 @@
       "processing",
     ].includes(v.route)
       ? "projects"
-      : v.route;
+      : v.route === "story"
+        ? "stories"
+        : v.route;
     const items = [
       ["dashboard", "Dashboard", "grid"],
       ["new", "New Project", "plus"],
       ["projects", "Projects", "folder"],
+      ["stories", "Stories", "spark"],
       ["usage", "Usage", "usage"],
       ["settings", "Settings", "settings"],
     ];
@@ -784,9 +787,12 @@
       "div",
       { className: "narrow" },
       h(PageHeader, {
-        title: "Turn a long video into publish-ready Shorts",
-        description:
-          "Start with a video. We’ll help you find the moments that matter.",
+        title: v.isStoryTab
+          ? "Turn a story into a narrated Short"
+          : "Turn a long video into publish-ready Shorts",
+        description: v.isStoryTab
+          ? "Give Claude a topic or paste a story. You get a voiced, captioned Short."
+          : "Start with a video. We’ll help you find the moments that matter.",
       }),
       h(
         "div",
@@ -795,10 +801,12 @@
           "div",
           { className: "step-label" },
           h("span", { className: "step-number" }, "1"),
-          "Add your source video",
+          v.isStoryTab ? "Start your story" : "Add your source video",
         ),
         h(Segments, { items: v.tabs, label: "Video source" }),
-        v.isUploadTab
+        v.isStoryTab
+          ? h(root.ShortsStoryUI.StoryStart, { v })
+          : v.isUploadTab
           ? v.hasSource
             ? h(
                 SourceSummary,
@@ -856,12 +864,14 @@
               ),
             ),
         v.npError &&
+          !v.isStoryTab &&
           h(ErrorState, {
             title: "We couldn't use this video.",
             message: v.npError,
           }),
       ),
       reveal &&
+        !v.isStoryTab &&
         h(
           "section",
           {
@@ -916,6 +926,7 @@
             ),
           ),
         ),
+      !v.isStoryTab &&
       h(
         "div",
         { className: "form-footer" },
@@ -2514,6 +2525,8 @@
       usage: Usage,
       settings: Settings,
       socialAccounts: root.ShortsSocialUI.SocialAccounts,
+      stories: root.ShortsStoryUI.StoryList,
+      story: root.ShortsStoryUI.StoryEditor,
     };
     return h(
       "div",
@@ -2576,6 +2589,10 @@
   }
   root.ShortsUI = {
     App,
+    Button,
+    Field,
+    Icon,
+    Segments,
     AppSidebar,
     PageHeader,
     ProjectTable,

@@ -2001,3 +2001,132 @@ details[open] > summary {
 .scheduled-batch input[type="datetime-local"] {
   max-width: 260px;
 }
+
+/* ---------- Story Mode ---------- */
+.story-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.story-step {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.story-step > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.story-step.current {
+  border-color: var(--accent);
+}
+.story-step.current .step-number {
+  background: var(--accent);
+  color: #fff;
+}
+.story-step.done .step-number {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.story-step.todo {
+  opacity: 0.65;
+}
+.story-fields > .field {
+  flex: 1 1 220px;
+}
+.scene-card {
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.scene-card summary {
+  cursor: pointer;
+}
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--s3);
+}
+.choice {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 96px;
+  padding: var(--s3);
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  background: var(--subtle);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.choice[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+/* Swatches matching the generated loops (app/story/visuals.py). */
+.choice.bg-midnight,
+.choice.bg-ember,
+.choice.bg-deep-sea,
+.choice.bg-forest,
+.choice.bg-dusk {
+  color: #fff;
+}
+.choice.bg-midnight { background: linear-gradient(160deg, #0b1026, #2a1b4a 60%, #101a3a); }
+.choice.bg-ember { background: linear-gradient(160deg, #2b0d05, #6b2a0b 60%, #1a0a05); }
+.choice.bg-deep-sea { background: linear-gradient(160deg, #041c2c, #0b3d5c 60%, #06283d); }
+.choice.bg-forest { background: linear-gradient(160deg, #07160d, #1d3b23 60%, #0c2416); }
+.choice.bg-dusk { background: linear-gradient(160deg, #2a1030, #5c2a3e 60%, #1a1030); }
+.story-row {
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.story-row:hover {
+  border-color: var(--accent);
+}
+.story-audio {
+  width: 100%;
+}
+.story-result {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s5);
+}
+.story-result .preview-stage,
+.story-result video {
+  max-width: 320px;
+}
+.meter-fill.indeterminate {
+  animation: story-slide 1.4s ease-in-out infinite;
+}
+@keyframes story-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@media (max-width: 640px) {
+  .story-steps {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meter-fill.indeterminate {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.5;
+  }
+}

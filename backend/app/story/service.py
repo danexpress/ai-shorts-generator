@@ -481,7 +481,12 @@ class StoryService:
         default = self.settings.story_tts_provider
         return {
             "defaultProvider": default if default in self.providers else None,
-            "providers": [provider.public() for provider in self.providers.values()],
+            # The demo tone voice is for offline testing: shown only when it is the default.
+            "providers": [
+                provider.public()
+                for name, provider in self.providers.items()
+                if name != "demo" or default == "demo"
+            ],
         }
 
     def request_voice(self, user_id: str, story_id: str, body: dict) -> dict:

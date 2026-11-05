@@ -12,6 +12,7 @@
 <script src="./tests.js"></script>
 <script src="./social-ui.js"></script>
 <script src="./components.js"></script>
+<script src="./story-ui.js"></script>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -32,6 +33,16 @@ const parseAvoid = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
 // Social platforms in display order (matches the backend's PLATFORMS).
 const PLATFORMS = ['youtube', 'tiktok', 'x', 'instagram'];
 const idem = () => 'idem_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+// Story Mode: editor state lives here; story-ui.js only renders it.
+const STORY_JOBS = ['voicing', 'rendering'];
+const storyInitial = () => ({
+  genres: [], lengths: [], providers: [], defaultProvider: null, assets: null, optionsError: null,
+  form: { mode: 'topic', topic: '', story: '', genre: 'mystery', seconds: 45, tone: '' }, creating: false, createError: null,
+  list: [], listLoading: false, listError: null,
+  currentId: null, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null,
+  voiceChoice: { provider: null, voice: null, speed: 1 }, renderChoice: null, audioUrl: null, audioFor: null, renders: [],
+});
+const spokenWords = (text) => (text.match(/\S+/g) || []).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 
 class Component extends DCLogic {
   state = {
@@ -50,6 +61,7 @@ class Component extends DCLogic {
     np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
     regen: { goal: 'educational', instruction: '', avoid: '' },
     tests: { open: false, running: false, results: [] }, toast: null,
+    story: storyInitial(),
   };
 
   componentDidMount() {
@@ -75,7 +87,7 @@ class Component extends DCLogic {
     };
     return boot();
   }
-  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
+  componentWillUnmount() { window.removeEventListener?.('message', this.socialListener); clearInterval(this.socialPopupTimer); clearTimeout(this.publishTimer); this.disposed = true; this.sessionRequest = (this.sessionRequest || 0) + 1; clearTimeout(this.bootTimer); this.stopPolling(); this.stopStoryPolling(); clearTimeout(this.toastTimer); this.releasePreviewUrls(); }
 
   // Google sign-in returns to the app with ?auth_error=<code> on failure; never tokens.
   takeAuthError() {
@@ -153,7 +165,7 @@ class Component extends DCLogic {
     this.publishKey = null;
     clearTimeout(this.publishTimer); clearInterval(this.socialPopupTimer); this.publishVersion = (this.publishVersion || 0) + 1;
     this.probeVersion = (this.probeVersion || 0) + 1;
-    this.stopPolling();
+    this.stopPolling(); this.stopStoryPolling(); this.storyOptionsLoaded = false;
     this.releasePreviewUrls();
     this.setState({ route: 'login', bootError: null, me: null, loginPassword: '', loginError: message,
       publishing: {loading:false,busy:false,error:null,copy:{},selected:{},settings:{youtube:{visibility:'private',made_for_kids:false,contains_synthetic_media:false},tiktok:{privacy:'',allow_comment:false,allow_duet:false,allow_stitch:false,brand_content:false,brand_organic:false,is_aigc:false,consent:false},instagram:{share_to_feed:true}},history:[],batch:null,creator:null,creatorError:null},
@@ -164,7 +176,7 @@ class Component extends DCLogic {
       captions: { clipId: null, track: null, draft: null, loading: false, error: null, saving: false, dirty: false, confirmReset: false, texts: {} },
       dashboardError: null, clipsError: null, transcriptError: null, usageError: null,
       np: { tab: 'upload', source: null, probing: false, error: null, code: null, goal: 'educational', instruction: '', avoid: '', url: '', rights: false, busy: false },
-      regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null,
+      regen: { goal: 'educational', instruction: '', avoid: '' }, toast: null, story: storyInitial(),
       accountDeletion: { confirm: '', busy: false, error: null } });
   }
   async signOut() {
@@ -218,8 +230,9 @@ class Component extends DCLogic {
     finally { this.setState({ dashboardLoading: false }); }
   }
   go(route) {
-    this.stopPolling(); clearTimeout(this.publishTimer);
+    this.stopPolling(); clearTimeout(this.publishTimer); this.stopStoryPolling();
     this.setState({ route, previewId: null });
+    if (route === 'stories') this.loadStories();
     if (route === 'dashboard' || route === 'projects') this.loadDashboard();
     if (route === 'usage') this.loadUsage();
     if (route === 'socialAccounts') this.loadSocialAccounts();
@@ -661,6 +674,194 @@ class Component extends DCLogic {
     this.setState((s) => ({ tests: { ...s.tests, running: false } }));
   }
 
+
+  /* ---------- Story Mode ---------- */
+  storyState(patch) { this.setState((s) => ({ story: { ...s.story, ...(typeof patch === 'function' ? patch(s.story) : patch) } })); }
+  stopStoryPolling() { clearTimeout(this.storyPoller); this.storyPoller = null; }
+  async loadStoryOptions(force = false) {
+    const epoch = this.sessionRequest;
+    try {
+      const [genres, voices, assets] = await Promise.all([
+        this.storyOptionsLoaded && !force ? null : this.api.listStoryGenres(),
+        this.storyOptionsLoaded && !force ? null : this.api.listStoryVoices(),
+        this.api.listStoryAssets(),
+      ]);
+      if (epoch !== this.sessionRequest || this.disposed) return;
+      this.storyOptionsLoaded = true;
+      this.storyState((st) => {
+        const next = { assets, optionsError: null };
+        if (genres) Object.assign(next, { genres: genres.genres, lengths: genres.lengths });
+        if (voices) {
+          const usable = voices.providers.filter((p) => p.available);
+          const provider = usable.find((p) => p.id === voices.defaultProvider) || usable[0];
+          Object.assign(next, { providers: voices.providers, defaultProvider: voices.defaultProvider });
+          if (!st.voiceChoice.provider && provider) next.voiceChoice = { provider: provider.id, voice: provider.voices[0]?.id, speed: provider.defaultSpeed };
+        }
+        return next;
+      });
+    } catch (e) { if (epoch === this.sessionRequest && !this.handleAuth(e)) this.storyState({ optionsError: e.message }); }
+  }
+  newStory() { this.go('new'); this.setNp({ tab: 'story', error: null, code: null }); this.loadStoryOptions(); }
+  async createStory() {
+    const st = this.state.story, f = st.form;
+    if (st.creating) return;
+    const epoch = this.sessionRequest;
+    this.storyState({ creating: true, createError: null });
+    try {
+      const body = { genre: f.genre, targetSeconds: f.seconds, tone: f.tone.trim() };
+      body[f.mode] = (f.mode === 'topic' ? f.topic : f.story).trim();
+      const story = await this.api.createStory(body);
+      if (epoch !== this.sessionRequest) return;
+      this.storyState({ form: { ...f, topic: '', story: '' } });
+      this.openStory(story.id, story);
+    } catch (e) { if (epoch === this.sessionRequest && !this.handleAuth(e)) this.storyState({ createError: e.message }); }
+    finally { this.storyState({ creating: false }); }
+  }
+  async loadStories() {
+    const epoch = this.sessionRequest;
+    this.storyState({ listLoading: true, listError: null });
+    try {
+      const [{ stories }] = await Promise.all([this.api.listStories(), this.storyOptionsLoaded ? null : this.loadStoryOptions()]);
+      if (epoch === this.sessionRequest) this.storyState({ list: stories });
+    } catch (e) { if (epoch === this.sessionRequest && !this.handleAuth(e)) this.storyState({ listError: e.message }); }
+    finally { this.storyState({ listLoading: false }); }
+  }
+  async openStory(id, story = null) {
+    this.go('story');
+    this.storyState({ currentId: id, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null, audioUrl: null, audioFor: null, renders: [], renderChoice: null });
+    this.loadStoryOptions();
+    if (story) this.showStory(story);
+    else await this.reloadStory();
+    this.loadStoryRenders();
+  }
+  async reloadStory() {
+    const id = this.state.story.currentId, epoch = this.sessionRequest;
+    if (!id) return;
+    try { const story = await this.api.getStory(id); if (epoch === this.sessionRequest && id === this.state.story.currentId) this.showStory(story); }
+    catch (e) { if (epoch === this.sessionRequest && !this.handleAuth(e)) this.storyState({ loadError: e.message }); }
+  }
+  // Show the server's story; keep unsaved script edits; follow running jobs.
+  showStory(story) {
+    const before = this.state.story.current;
+    const settings = story.renderSettings, bg = settings.background;
+    this.storyState((st) => ({
+      current: story,
+      draft: st.dirty && st.draft ? st.draft : JSON.parse(JSON.stringify(story.script)),
+      voiceChoice: story.voice ? { provider: story.voice.provider, voice: story.voice.voice, speed: story.voice.speed } : st.voiceChoice,
+      renderChoice: st.renderChoice && before?.id === story.id ? st.renderChoice : { ...settings, background: { kind: bg.kind, id: bg.id || bg.name || bg.projectId } },
+    }));
+    const voiceKey = story.voice ? story.revision + ':' + story.voice.durationSec + story.voice.voice + story.voice.speed : null;
+    if (story.voice && this.state.story.audioFor !== voiceKey && story.status !== 'voicing') this.loadStoryAudio(story.id, voiceKey);
+    if (before && before.status === 'rendering' && story.status === 'rendered') { this.loadStoryRenders(); this.notify('Your Short is ready.'); }
+    if (before && before.status === 'voicing' && story.status === 'voiced') this.notify('The voice is ready. Have a listen.');
+    this.stopStoryPolling();
+    // Follow a running job while the story is on screen (checked when the timer fires).
+    if (STORY_JOBS.includes(story.status)) this.storyPoller = setTimeout(() => { if (this.state.route === 'story') this.reloadStory(); }, 1500);
+  }
+  async loadStoryAudio(id, key) {
+    this.storyState({ audioFor: key });
+    try { const link = await this.api.getStoryVoicePlayback(id); if (id === this.state.story.currentId) this.storyState({ audioUrl: this.mediaUrl(link.url) }); }
+    catch (e) { this.handleAuth(e); }
+  }
+  async loadStoryRenders() {
+    const id = this.state.story.currentId;
+    if (!id) return;
+    try {
+      const { renders } = await this.api.listStoryRenders(id);
+      if (id !== this.state.story.currentId) return;
+      this.storyState({ renders: renders.map((r) => ({ ...r, url: this.mediaUrl(r.url), downloadUrl: this.mediaUrl(r.downloadUrl), playUrl: this.mediaUrl(r.url), downloadHref: this.mediaUrl(r.downloadUrl), createdLabel: new Date(r.createdAt).toLocaleString(), expiresLabel: fmtDate(r.expiresAt) })) });
+    } catch (e) { this.handleAuth(e); }
+  }
+  editStoryField(field, value) { this.storyState((st) => ({ draft: { ...st.draft, [field]: value }, dirty: true, scriptError: null })); }
+  editStoryScene(index, field, value) {
+    this.storyState((st) => ({ draft: { ...st.draft, scenes: st.draft.scenes.map((scene, i) => (i === index ? { ...scene, [field]: value } : scene)) }, dirty: true, scriptError: null }));
+  }
+  // Run one story action: busy flag, readable error, then show the returned story.
+  async storyAction(busy, call, errorKey = 'scriptError') {
+    const st = this.state.story;
+    if (st.busy || !st.current) return;
+    const epoch = this.sessionRequest, id = st.current.id;
+    this.storyState({ busy, scriptError: null });
+    try {
+      const story = await call(id, st.current.revision);
+      if (epoch !== this.sessionRequest || id !== this.state.story.currentId) return;
+      this.storyState({ dirty: false, draft: null });
+      this.showStory(story);
+    } catch (e) {
+      if (epoch !== this.sessionRequest || this.handleAuth(e)) return;
+      this.storyState({ [errorKey]: e.message });
+      if (e.code === 'STALE_REVISION' || e.code === 'STORY_BUSY') await this.reloadStory();
+    } finally { this.storyState({ busy: null }); }
+  }
+  saveStoryScript() { const draft = this.state.story.draft; return this.storyAction('save', (id, revision) => this.api.updateStoryScript(id, { revision, script: draft })); }
+  regenerateStory(shorten = false) { return this.storyAction(shorten ? 'shorten' : 'regenerate', (id, revision) => this.api.regenerateStoryScript(id, { revision, shorten })); }
+  generateStoryVoice() { const c = this.state.story.voiceChoice; return this.storyAction('voice', (id, revision) => this.api.requestStoryVoice(id, { revision, provider: c.provider, voice: c.voice, speed: c.speed })); }
+  renderStoryShort() { const c = this.state.story.renderChoice; return this.storyAction('render', (id, revision) => this.api.renderStory(id, { revision, background: c.background, music: c.music || null, captionPreset: c.captionPreset, captions: c.captions, titleCard: c.titleCard })); }
+  setStoryVoice(patch) {
+    this.storyState((st) => {
+      const next = { ...st.voiceChoice, ...patch };
+      if (patch.provider && patch.provider !== st.voiceChoice.provider) {
+        const p = st.providers.find((x) => x.id === patch.provider);
+        Object.assign(next, { voice: p?.voices[0]?.id, speed: p?.defaultSpeed ?? 1 });
+      }
+      return { voiceChoice: next };
+    });
+  }
+  async deleteStory() {
+    const story = this.state.story.current;
+    if (!story || !window.confirm(`Delete “${story.title}” and its rendered Shorts? This cannot be undone.`)) return;
+    try { await this.api.deleteStory(story.id); this.notify('Story deleted.'); this.go('stories'); }
+    catch (e) { if (!this.handleAuth(e)) this.storyState({ scriptError: e.message }); }
+  }
+  storyView() {
+    const st = this.state.story, cur = st.current, draft = st.draft;
+    const genreLabel = (id) => st.genres.find((g) => g.id === id)?.label || id;
+    const f = st.form, text = (f.mode === 'topic' ? f.topic : f.story).trim();
+    const base = {
+      ...st,
+      canCreate: !st.creating && text.length >= (f.mode === 'topic' ? 3 : 40) && !!f.genre,
+      setForm: (patch) => this.storyState((x) => ({ form: { ...x.form, ...patch }, createError: null })),
+      create: () => this.createStory(), newStory: () => this.newStory(), reloadList: () => this.loadStories(),
+      open: (id) => this.openStory(id), reload: () => this.reloadStory(),
+      list: st.list.map((item) => ({ ...item, genreLabel: genreLabel(item.genre), updatedLabel: fmtDate(item.updatedAt) })),
+      backgrounds: st.assets?.backgrounds || [], music: st.assets?.music || [], captionPresets: st.assets?.captionPresets || [],
+    };
+    if (!cur || !draft) return base;
+    const words = draft.scenes.map((scene) => spokenWords(scene.narration || ''));
+    const total = words.reduce((a, b) => a + b, 0);
+    const estimate = Math.round(total * 60 / 140 + 0.25 * Math.max(0, draft.scenes.length - 1));
+    const [low, high] = cur.wordBudget;
+    const voice = cur.voice, jobRunning = STORY_JOBS.includes(cur.status);
+    const voiceReady = !!voice && !voice.stale && !st.dirty;
+    const provider = st.providers.find((p) => p.id === st.voiceChoice.provider);
+    const rendered = st.renders.length > 0 && cur.status === 'rendered';
+    const warnings = st.dirty ? [] : cur.warnings;
+    return {
+      ...base,
+      warnings, jobRunning, voiceReady,
+      wordLine: `${total} words · budget ${low}–${high} · about ${estimate} s`,
+      sceneWords: words.map((n) => n + (n === 1 ? ' word' : ' words')),
+      canShorten: !st.dirty && (total > high || !!voice?.tooLong || warnings.some((w) => /60/.test(w))),
+      canVoice: !st.dirty && !jobRunning && !st.busy && !!provider?.available && !!st.voiceChoice.voice,
+      canRender: voiceReady && !jobRunning && !st.busy && !!st.renderChoice?.background,
+      providers: st.providers,
+      steps: [
+        { label: 'Script', state: st.dirty ? 'current' : 'done', detail: st.dirty ? 'Unsaved changes' : `${total} words, about ${estimate} s` },
+        { label: 'Voice', state: voiceReady ? 'done' : st.dirty ? 'todo' : 'current', detail: cur.status === 'voicing' ? 'Generating…' : voice ? (voice.stale ? 'Out of date' : `${Math.round(voice.durationSec)} s`) : cur.status === 'voice_failed' ? 'Failed' : 'Not generated' },
+        { label: 'Render', state: rendered && voiceReady ? 'done' : voiceReady ? 'current' : 'todo', detail: cur.status === 'rendering' ? 'Rendering…' : cur.status === 'render_failed' ? 'Failed' : st.renders.length ? 'Short ready' : 'Not rendered' },
+      ],
+      editField: (field, value) => this.editStoryField(field, value),
+      editScene: (i, field, value) => this.editStoryScene(i, field, value),
+      saveScript: () => this.saveStoryScript(),
+      discard: () => this.storyState({ draft: JSON.parse(JSON.stringify(cur.script)), dirty: false, scriptError: null }),
+      regenerate: () => this.regenerateStory(false), shorten: () => this.regenerateStory(true),
+      setVoice: (patch) => this.setStoryVoice(patch), generateVoice: () => this.generateStoryVoice(),
+      setRender: (patch) => this.storyState((x) => ({ renderChoice: { ...x.renderChoice, ...patch } })), render: () => this.renderStoryShort(),
+      publish: (render) => this.openPublish({ ...render, storyId: cur.id }),
+      remove: () => this.deleteStory(),
+    };
+  }
+
   renderVals() {
     const s = this.state;
     const me = s.me;
@@ -694,7 +895,7 @@ class Component extends DCLogic {
     const srcMin = src ? Math.ceil(src.durationSec / 60) : 0;
     const urlImportOn = !!(me && me.features.youtubeImport);
     const canStart = !np.busy && !np.probing && (np.tab === 'upload' ? !!src : urlImportOn && !!np.url.trim() && np.rights);
-    const tabBtn = (id, label) => ({ label, pressed: String(np.tab === id), bg: np.tab === id ? 'var(--color-accent)' : 'transparent', fg: np.tab === id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => this.setNp({ tab: id, error: null, code: null }) });
+    const tabBtn = (id, label) => ({ label, pressed: String(np.tab === id), bg: np.tab === id ? 'var(--color-accent)' : 'transparent', fg: np.tab === id ? 'var(--color-bg)' : 'var(--color-text)', pick: () => { this.setNp({ tab: id, error: null, code: null }); if (id === 'story') this.loadStoryOptions(); } });
 
     // processing
     const order = ['uploading', 'transcribing', 'analyzing', 'ready'];
@@ -835,8 +1036,8 @@ class Component extends DCLogic {
       openActive: () => activeProj && this.openProject(activeProj),
       // new project
       // The URL option is always shown; when the server has import off it explains why.
-      tabs: [tabBtn('upload', 'Upload video'), tabBtn('url', 'YouTube URL')],
-      isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', urlImportOff: !urlImportOn,
+      tabs: [tabBtn('upload', 'Upload video'), tabBtn('url', 'YouTube URL'), tabBtn('story', 'Story')],
+      isUploadTab: np.tab === 'upload', isUrlTab: np.tab === 'url', isStoryTab: np.tab === 'story', urlImportOff: !urlImportOn,
       noSource: !src && !np.probing, probing: np.probing, hasSource: !!src,
       srcName: src ? src.title : '', srcFile: src ? src.fileName : '',
       srcSpecs: src ? [
@@ -882,9 +1083,11 @@ class Component extends DCLogic {
       testSummary: tr.length ? (tr.length - failed) + ' passed · ' + failed + ' failed · ' + tr.length + ' of ' + total + ' run' : total + ' tests against the mock backend and HTTP client. Each test builds its own isolated backend with a fake clock.',
       toast: s.toast,
     };
-    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts', publish: 'Publish Short' };
+    const labels = { boot: 'Loading', login: 'Sign in', dashboard: 'Dashboard', projects: 'Projects', new: 'New Project', processing: 'Processing', suggestions: 'Best moments', editor: 'Preview Short', result: 'Your Short', transcript: 'Transcript', usage: 'Usage', settings: 'Settings', socialAccounts: 'Social Accounts', publish: 'Publish Short', stories: 'Stories', story: 'Story' };
     Object.assign(values, {
       publishing: s.publishing, confirmSocialTranscript: value => this.setState(t=>({publishing:{...t.publishing,transcriptConfirmed:value}})), openPublish: result => this.openPublish(result || s.result), editSocialCopy: (p,f,v) => this.editSocialCopy(p,f,v), saveSocialDraft: p => this.saveSocialDraft(p), editPublishSetting: (p,f,v) => this.editPublishSetting(p,f,v), selectPublishPlatform: (p,v) => this.selectPublishPlatform(p,v), generateSocialCopy: p => this.generateSocialCopy(p), publishEverywhere: () => this.publishEverywhere(), retrySocialJob: job => this.retrySocialJob(job), setPublishWhen: patch => this.setPublishWhen(patch), cancelScheduled: batch => this.changeSchedule(batch,'cancel'), reschedulePublish: (batch,value) => this.changeSchedule(batch,'reschedule',value), msToLocalInput: ms => window.ShortsServices.msToLocalInput(ms), refreshPublish: () => this.loadPublish(s.result,true),
+      story: this.storyView(),
+      publishBack: () => (s.result?.storyId ? this.openStory(s.result.storyId) : this.go('result')),
       social: s.social, loadSocialAccounts: () => this.loadSocialAccounts(), connectSocial: platform => this.connectSocial(platform), disconnectSocial: platform => this.disconnectSocial(platform),
       bootError: s.bootError, restoreSession: () => this.restoreSession(), showLogin: () => this.resetSession(),
       route: s.route, pageLabel: labels[s.route], theme: s.theme, email: me?.user.email || '',

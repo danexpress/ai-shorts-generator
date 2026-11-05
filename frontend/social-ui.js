@@ -363,8 +363,8 @@
       null,
       h(
         "button",
-        { className: "btn ghost mb-5", onClick: () => v.navigate("result") },
-        "Back to your Short",
+        { className: "btn ghost mb-5", onClick: v.publishBack },
+        v.result?.storyId ? "Back to your story" : "Back to your Short",
       ),
       h(root.ShortsUI.PageHeader, {
         title: active

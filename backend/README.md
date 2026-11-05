@@ -139,7 +139,7 @@ Requests use `client.beta.messages.create` with effort `HIGHLIGHT_EFFORT` (defau
 
 ## Story Mode
 
-Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle") or a pasted story into a narrated Short. The backend pipeline is complete: script → voice → render. The Story tab in the web app comes next.
+Story Mode turns a topic ("a lighthouse keeper who finds a message in a bottle") or a pasted story into a narrated Short. The pipeline goes script → voice → render, and in the web app it's New Project → **Story** (see the [frontend README](../frontend/README.md#story-mode)). The demo tone voice appears in the voice picker only when `STORY_TTS_PROVIDER=demo`.
 
 1. **Request** (`POST /v1/stories`): either a topic (3–300 characters) or a pasted story (40–6,000 characters), plus a genre, a target length of 30, 45 or 60 seconds, and an optional tone (each genre has a default tone).
 2. **Prompt** (`app/story/prompt.py`): the rules are:

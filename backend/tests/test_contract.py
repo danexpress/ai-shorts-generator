@@ -224,6 +224,22 @@ def test_cors_allows_local_frontend_and_rejects_unlisted_origin(client):
             assert response.headers["access-control-allow-origin"] == origin
 
 
+def test_cors_preflight_allows_every_method_the_api_uses(client):
+    # Browsers preflight cross-origin writes; a method missing here works in tests
+    # and curl but fails only in the browser.
+    methods = {method.upper() for item in SPEC["paths"].values() for method in item}
+    for method in sorted(methods - {"GET"}):
+        response = client.options(
+            "/v1/me",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": "content-type,x-csrf-token",
+            },
+        )
+        assert response.status_code == 200, method
+
+
 def test_validation_and_routing_errors_use_stable_envelope(client, headers):
     assert_error(
         client.post("/v1/uploads", headers=headers, content="{broken"), 422, "INVALID_INPUT"
