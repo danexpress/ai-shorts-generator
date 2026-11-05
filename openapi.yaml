@@ -2001,6 +2001,109 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security: []
+  /v1/story-assets:
+    get:
+      tags:
+      - Story
+      summary: Assets
+      description: Backgrounds (bundled loops, your folder, your uploads), music and caption styles.
+      operationId: listStoryAssets
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryAssets'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /v1/stories/{id}/render:
+    post:
+      tags:
+      - Story
+      summary: Render
+      description: Queue the final render; poll GET /v1/stories/{id} until status is "rendered".
+      operationId: renderStory
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoryRenderRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Story'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/stories/{id}/renders:
+    get:
+      tags:
+      - Story
+      summary: Renders
+      operationId: listStoryRenders
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoryRenderList'
+        '422':
+          description: Invalid request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: Stable API error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -2302,6 +2405,7 @@ components:
           enum:
           - upload
           - youtube_url
+          - story
         status:
           $ref: '#/components/schemas/ProjectState'
         durationSec:
@@ -3983,6 +4087,9 @@ components:
           - voicing
           - voiced
           - voice_failed
+          - rendering
+          - rendered
+          - render_failed
           title: Status
         revision:
           type: integer
@@ -4036,6 +4143,14 @@ components:
           nullable: true
         voiceJob:
           $ref: '#/components/schemas/StoryVoiceJob'
+        renderJob:
+          $ref: '#/components/schemas/StoryRenderJob'
+        renderSettings:
+          $ref: '#/components/schemas/StoryRenderSettings'
+        lastRenderId:
+          title: Lastrenderid
+          type: string
+          nullable: true
       type: object
       required:
       - id
@@ -4056,7 +4171,114 @@ components:
       - warnings
       - voice
       - voiceJob
+      - renderJob
+      - renderSettings
+      - lastRenderId
       title: Story
+    StoryAsset:
+      properties:
+        kind:
+          type: string
+          enum:
+          - bundled
+          - folder
+          - library
+          title: Kind
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+        description:
+          type: string
+          title: Description
+      type: object
+      required:
+      - kind
+      - id
+      - label
+      - description
+      title: StoryAsset
+    StoryAssets:
+      properties:
+        backgrounds:
+          items:
+            $ref: '#/components/schemas/StoryAsset'
+          type: array
+          title: Backgrounds
+        music:
+          items:
+            $ref: '#/components/schemas/StoryMusicTrack'
+          type: array
+          title: Music
+        captionPresets:
+          items:
+            $ref: '#/components/schemas/StoryCaptionPreset'
+          type: array
+          title: Captionpresets
+      type: object
+      required:
+      - backgrounds
+      - music
+      - captionPresets
+      title: StoryAssets
+    StoryBackgroundChoice:
+      properties:
+        kind:
+          type: string
+          enum:
+          - bundled
+          - folder
+          - library
+          title: Kind
+        id:
+          type: string
+          maxLength: 255
+          title: Id
+      type: object
+      required:
+      - kind
+      - id
+      title: StoryBackgroundChoice
+    StoryBackgroundRef:
+      properties:
+        kind:
+          type: string
+          enum:
+          - bundled
+          - folder
+          - library
+          title: Kind
+        id:
+          title: Id
+          type: string
+          nullable: true
+        name:
+          title: Name
+          type: string
+          nullable: true
+        projectId:
+          title: Projectid
+          type: string
+          nullable: true
+      type: object
+      required:
+      - kind
+      title: StoryBackgroundRef
+    StoryCaptionPreset:
+      properties:
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+      type: object
+      required:
+      - id
+      - label
+      title: StoryCaptionPreset
     StoryCreateRequest:
       properties:
         topic:
@@ -4107,12 +4329,16 @@ components:
             type: string
           type: array
           title: Moods
+        defaultBackground:
+          type: string
+          title: Defaultbackground
       type: object
       required:
       - id
       - label
       - defaultTone
       - moods
+      - defaultBackground
       title: StoryGenre
     StoryGenres:
       properties:
@@ -4170,6 +4396,19 @@ components:
       - inputLufs
       - outputLufs
       title: StoryLoudness
+    StoryMusicTrack:
+      properties:
+        id:
+          type: string
+          title: Id
+        label:
+          type: string
+          title: Label
+      type: object
+      required:
+      - id
+      - label
+      title: StoryMusicTrack
     StoryRegenerateRequest:
       properties:
         revision:
@@ -4184,6 +4423,94 @@ components:
       required:
       - revision
       title: StoryRegenerateRequest
+    StoryRenderJob:
+      properties:
+        request:
+          $ref: '#/components/schemas/StoryRenderSettings'
+          nullable: true
+        error:
+          $ref: '#/components/schemas/StoryJobError'
+          nullable: true
+      type: object
+      required:
+      - request
+      - error
+      title: StoryRenderJob
+    StoryRenderList:
+      properties:
+        renders:
+          items:
+            $ref: '#/components/schemas/RenderedClip'
+          type: array
+          title: Renders
+      type: object
+      required:
+      - renders
+      title: StoryRenderList
+    StoryRenderRequest:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        background:
+          $ref: '#/components/schemas/StoryBackgroundChoice'
+          nullable: true
+        music:
+          title: Music
+          type: string
+          maxLength: 255
+          nullable: true
+        captionPreset:
+          type: string
+          maxLength: 40
+          title: Captionpreset
+          default: clean-bold
+        captions:
+          type: boolean
+          title: Captions
+          default: true
+        titleCard:
+          type: string
+          enum:
+          - title
+          - hook
+          - none
+          title: Titlecard
+          default: title
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      title: StoryRenderRequest
+    StoryRenderSettings:
+      properties:
+        background:
+          $ref: '#/components/schemas/StoryBackgroundRef'
+        music:
+          title: Music
+          type: string
+          nullable: true
+        captionPreset:
+          type: string
+          title: Captionpreset
+        captions:
+          type: boolean
+          title: Captions
+        titleCard:
+          type: string
+          enum:
+          - title
+          - hook
+          - none
+          title: Titlecard
+      type: object
+      required:
+      - background
+      - music
+      - captionPreset
+      - captions
+      - titleCard
+      title: StoryRenderSettings
     StoryScene:
       properties:
         id:
@@ -4279,6 +4606,9 @@ components:
           - voicing
           - voiced
           - voice_failed
+          - rendering
+          - rendered
+          - render_failed
           title: Status
         genre:
           type: string

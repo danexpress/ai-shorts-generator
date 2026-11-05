@@ -10,12 +10,13 @@ import time
 
 from sqlalchemy import select
 
-from ..db_models import StoryRecord
+from ..captions.presets import DEFAULT_PRESET, PRESETS
+from ..db_models import ProjectRecord, RenderRecord, StoryRecord
 from ..errors import ApiError
 from ..llm import ClaudeModel, InvalidOutput, LLMUnavailable
 from ..social.accounts import rate_limit
-from ..store import oid
-from . import cache
+from ..store import Store, oid
+from . import cache, music, visuals
 from .genres import GENRES
 from .prompt import PROMPT_VERSION
 from .script import (
@@ -36,6 +37,7 @@ from .worker import remove_story_files, story_dir
 logger = logging.getLogger(__name__)
 
 DOCUMENT_VERSION = 1
+RENDER_KEYS = ("background", "music", "captionPreset", "captions", "titleCard")
 RATE_LIMIT = 6  # script generations (and voice requests) per creator per minute
 PLAYBACK_SECONDS = 30 * 60
 
@@ -99,6 +101,30 @@ def view(record: StoryRecord) -> dict:
             "progress": record.progress if pending else None,
             "error": document.get("voiceError") if record.status == "voice_failed" else None,
         },
+        "renderJob": {
+            "request": render_settings(document) if record.status == "rendering" else None,
+            "error": document.get("renderError") if record.status == "render_failed" else None,
+        },
+        "renderSettings": render_settings(document, saved=True),
+        "lastRenderId": document.get("lastRenderId"),
+    }
+
+
+def render_settings(document: dict, saved=False) -> dict | None:
+    """The pending render request, or (saved=True) the settings of the last render, or
+    the genre defaults when the story was never rendered."""
+    if not saved:
+        pending = document.get("renderRequest")
+        return {key: pending[key] for key in RENDER_KEYS} if pending else None
+    style = document.get("style") or {}
+    genre = GENRES.get(document["request"]["genre"])
+    return {
+        "background": document.get("background")
+        or {"kind": "bundled", "id": genre.default_background if genre else "midnight"},
+        "music": (document.get("music") or {}).get("name"),
+        "captionPreset": style.get("captionPreset") or DEFAULT_PRESET,
+        "captions": style.get("captions", True),
+        "titleCard": style.get("titleCard", "title"),
     }
 
 
@@ -264,10 +290,11 @@ class StoryService:
             )
 
     def check_idle(self, record: StoryRecord):
-        if record.status == "voicing":
-            raise ApiError(
-                "STORY_BUSY", "The voice is being generated. Wait for it to finish.", 409
+        if record.status in ("voicing", "rendering"):
+            what = (
+                "voice is being generated" if record.status == "voicing" else "Short is rendering"
             )
+            raise ApiError("STORY_BUSY", f"The {what}. Wait for it to finish.", 409)
 
     def save_script(self, user_id, story_id, revision, script, source, extra=None) -> dict:
         with self.database.transaction() as db:
@@ -327,8 +354,126 @@ class StoryService:
 
     def delete(self, user_id: str, story_id: str):
         with self.database.transaction() as db:
-            db.delete(self.owned(db, user_id, story_id))
+            record = self.owned(db, user_id, story_id)
+            project = db.get(ProjectRecord, record.document.get("projectId") or "")
+            if project and project.status != "deleted":
+                # Removes its renders and cancels queued posts, like deleting a project.
+                Store(db, self.settings, self.clock).delete(project)
+            db.delete(record)
         remove_story_files(self.settings.media_dir, story_id)
+
+    # ---------- render ----------
+
+    def assets(self, user_id: str) -> dict:
+        with self.database.sessions() as db:
+            backgrounds = visuals.available(db, self.settings, user_id)
+        return {
+            "backgrounds": backgrounds,
+            "music": music.available(self.settings),
+            "captionPresets": [
+                {"id": preset.id, "label": preset.label} for preset in PRESETS.values()
+            ],
+        }
+
+    def request_render(self, user_id: str, story_id: str, body: dict) -> dict:
+        """Queue the final render; the processing worker picks it up (status "rendering")."""
+        if body["captionPreset"] not in PRESETS:
+            raise ApiError("INVALID_INPUT", "Choose one of the available caption styles.", 422)
+        if body.get("music") and music.resolve(self.settings, body["music"]) is None:
+            raise ApiError("MUSIC_UNAVAILABLE", "That music track is not available.", 409)
+        self.limit(user_id)
+        with self.database.transaction() as db:
+            record = self.owned(db, user_id, story_id)
+            self.check_revision(record, body["revision"])
+            self.check_idle(record)
+            voice = voice_view(record.document)
+            if not voice:
+                raise ApiError("VOICE_REQUIRED", "Generate the voice before rendering.", 409)
+            if voice["stale"]:
+                raise ApiError(
+                    "VOICE_STALE",
+                    "The script changed since the voice was generated. Generate it again.",
+                    409,
+                )
+            background = (
+                body.get("background") or render_settings(record.document, True)["background"]
+            )
+            offered = {
+                (item["kind"], item["id"]) for item in visuals.available(db, self.settings, user_id)
+            }
+            ref_id = background.get("id") or background.get("name") or background.get("projectId")
+            if (background.get("kind"), ref_id) not in offered:
+                raise ApiError(
+                    "BACKGROUND_UNAVAILABLE", "Choose one of the available backgrounds.", 409
+                )
+            record.document = {
+                **record.document,
+                "renderRequest": {
+                    "id": oid("rrq"),
+                    "background": visuals.reference({"kind": background["kind"], "id": ref_id}),
+                    "music": body.get("music") or None,
+                    "captionPreset": body["captionPreset"],
+                    "captions": body["captions"],
+                    "titleCard": body["titleCard"],
+                    "requestedAt": self.now(),
+                },
+                "renderError": None,
+            }
+            record.update(
+                status="rendering",
+                attempts=0,
+                progress=None,
+                leaseOwner=None,
+                leaseUntil=None,
+                revision=record.revision + 1,
+                updatedAt=self.now(),
+            )
+            db.flush()
+            return view(record)
+
+    def renders(self, user_id: str, story_id: str) -> "list[dict]":
+        """This story's renders, newest first, shaped like clip renders."""
+        from ..routers.media import media_signature
+
+        now = self.now()
+        with self.database.sessions() as db:
+            record = self.owned(db, user_id, story_id)
+            project_id = record.document.get("projectId")
+            rows = list(
+                db.scalars(
+                    select(RenderRecord)
+                    .where(
+                        RenderRecord.projectId == (project_id or ""),
+                        RenderRecord.clipId == story_id,
+                        RenderRecord.expiresAt > now,
+                    )
+                    .order_by(RenderRecord.createdAt.desc(), RenderRecord.id)
+                )
+            )
+        expires = now // 1000 + PLAYBACK_SECONDS
+        items = []
+        for render in rows:
+            signature = media_signature(render.id, expires, self.settings.media_signing_key)
+            url = f"/v1/rendered/{render.id}?expires={expires}&signature={signature}"
+            items.append(
+                {
+                    "id": render.id,
+                    "projectId": render.projectId,
+                    "clipId": render.clipId,
+                    "filename": render.fileName,
+                    "resolution": render.resolution,
+                    "durationSec": render.durationSec,
+                    "bytes": render.sizeBytes,
+                    "createdAt": render.createdAt,
+                    "expiresAt": render.expiresAt,
+                    "url": url,
+                    "downloadUrl": url + "&download=true",
+                    "framing": render.framing or "crop",
+                    "captions": render.captions is not None,
+                    "captionPreset": (render.captions or {}).get("preset"),
+                }
+            )
+        return items
 
     # ---------- voiceover ----------
 

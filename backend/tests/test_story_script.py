@@ -211,7 +211,7 @@ def test_genre_templates_are_discovered_in_order():
     assert list(GENRES) == ["mystery", "horror", "motivational", "history", "funny"]
     for genre in GENRES.values():
         assert isinstance(genre, Genre) and genre.guidance and genre.moods
-        assert set(genre.public()) == {"id", "label", "defaultTone", "moods"}
+        assert set(genre.public()) == {"id", "label", "defaultTone", "moods", "defaultBackground"}
 
 
 @pytest.mark.parametrize("seconds", LENGTHS)

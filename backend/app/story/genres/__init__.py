@@ -19,6 +19,8 @@ class Genre:
     # Suggested scene moods (later used to pick music and visual style).
     moods: tuple[str, ...]
     order: int = 100
+    # Bundled background preselected for this genre (see app/story/visuals.py).
+    default_background: str = "midnight"
 
     def public(self) -> dict:
         return {
@@ -26,6 +28,7 @@ class Genre:
             "label": self.label,
             "defaultTone": self.default_tone,
             "moods": list(self.moods),
+            "defaultBackground": self.default_background,
         }
 
 

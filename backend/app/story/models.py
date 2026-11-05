@@ -4,11 +4,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..models import RequestModel
+from ..models import RenderedClip, RequestModel
 from .genres import GENRES
 
 TargetSeconds = Literal[30, 45, 60]
-StoryStatus = Literal["draft", "voicing", "voiced", "voice_failed"]
+StoryStatus = Literal[
+    "draft", "voicing", "voiced", "voice_failed", "rendering", "rendered", "render_failed"
+]
+TitleCard = Literal["title", "hook", "none"]
+BackgroundKind = Literal["bundled", "folder", "library"]
 
 
 class StoryCreateRequest(RequestModel):
@@ -135,11 +139,70 @@ class StoryVoiceJob(BaseModel):
     error: StoryJobError | None
 
 
+class StoryBackgroundChoice(BaseModel):
+    kind: BackgroundKind
+    id: str = Field(max_length=255)
+
+
+class StoryRenderRequest(RequestModel):
+    revision: int
+    # Omitted: the last render's background, or the genre's default loop.
+    background: StoryBackgroundChoice | None = None
+    music: str | None = Field(default=None, max_length=255)
+    captionPreset: str = Field(default="clean-bold", max_length=40)
+    captions: bool = True
+    titleCard: TitleCard = "title"
+
+
+class StoryBackgroundRef(BaseModel):
+    kind: BackgroundKind
+    id: str | None = None
+    name: str | None = None
+    projectId: str | None = None
+
+
+class StoryRenderSettings(BaseModel):
+    background: StoryBackgroundRef
+    music: str | None
+    captionPreset: str
+    captions: bool
+    titleCard: TitleCard
+
+
+class StoryRenderJob(BaseModel):
+    request: StoryRenderSettings | None
+    error: StoryJobError | None
+
+
+class StoryAsset(BaseModel):
+    kind: BackgroundKind
+    id: str
+    label: str
+    description: str
+
+
+class StoryMusicTrack(BaseModel):
+    id: str
+    label: str
+
+
+class StoryCaptionPreset(BaseModel):
+    id: str
+    label: str
+
+
+class StoryAssets(BaseModel):
+    backgrounds: list[StoryAsset]
+    music: list[StoryMusicTrack]
+    captionPresets: list[StoryCaptionPreset]
+
+
 class StoryGenre(BaseModel):
     id: str
     label: str
     defaultTone: str
     moods: list[str]
+    defaultBackground: str
 
 
 class StoryGenres(BaseModel):
@@ -166,6 +229,9 @@ class Story(BaseModel):
     warnings: list[str]
     voice: StoryVoice | None
     voiceJob: StoryVoiceJob
+    renderJob: StoryRenderJob
+    renderSettings: StoryRenderSettings
+    lastRenderId: str | None
 
 
 class StorySummary(BaseModel):
@@ -181,3 +247,7 @@ class StorySummary(BaseModel):
 
 class StoryList(BaseModel):
     stories: list[StorySummary]
+
+
+class StoryRenderList(BaseModel):
+    renders: list[RenderedClip]

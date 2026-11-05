@@ -11,4 +11,5 @@ GENRE = Genre(
     default_tone="slow, unsettling",
     moods=("calm", "uneasy", "dread", "shock"),
     order=20,
+    default_background="dusk",
 )

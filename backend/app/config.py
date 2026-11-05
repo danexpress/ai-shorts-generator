@@ -98,6 +98,14 @@ class Settings:
     elevenlabs_cost_per_1k_chars: float = field(
         default_factory=lambda: float(os.environ.get("ELEVENLABS_COST_PER_1K_CHARS", "0") or 0)
     )
+    # Story Mode background loops and music you add yourself (royalty-free or your own).
+    # Empty: MEDIA_DIR/story-library/backgrounds and MEDIA_DIR/story-library/music.
+    story_backgrounds_dir: str = field(
+        default_factory=lambda: os.environ.get("STORY_BACKGROUNDS_DIR", "").strip()
+    )
+    story_music_dir: str = field(
+        default_factory=lambda: os.environ.get("STORY_MUSIC_DIR", "").strip()
+    )
     job_lease_seconds: int = 300
     # Sign-in. Google OIDC is enabled when both client values are set.
     google_client_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLIENT_ID", ""))

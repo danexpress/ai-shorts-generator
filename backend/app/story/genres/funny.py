@@ -11,4 +11,5 @@ GENRE = Genre(
     default_tone="playful and deadpan",
     moods=("light", "awkward", "chaotic", "punchline"),
     order=50,
+    default_background="deep-sea",
 )

@@ -64,6 +64,28 @@ def ffmpeg_path(configured: str | None = None, need_subtitles: bool = False) -> 
     raise RendererUnavailable("No FFmpeg with subtitle support (libass) was found.")
 
 
+def fill_filter(width: int, height: int) -> str:
+    """Scale and center-crop any video to fill a width x height canvas."""
+    # Square the pixels first so the crop keeps the true display aspect ratio.
+    return (
+        "scale=w='trunc(iw*sar/2)*2':h='trunc(ih/2)*2',setsar=1,"
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1"
+    )
+
+
+def caption_workdir(parent: Path, captions_ass: str, fonts_dir: Path | None = None):
+    """A private directory holding captions.ass (and the fonts), plus the `ass` filter
+    that reads them. Run FFmpeg with cwd set to it: relative names inside a private
+    directory avoid filtergraph path escaping. The caller cleans the directory up."""
+    workdir = tempfile.TemporaryDirectory(prefix="captions-", dir=parent)
+    work = Path(workdir.name)
+    (work / "captions.ass").write_text(captions_ass, "utf-8")
+    if fonts_dir:
+        shutil.copytree(fonts_dir, work / "fonts", ignore=shutil.ignore_patterns("*.txt"))
+    return workdir, "ass=captions.ass" + (":fontsdir=fonts" if fonts_dir else "")
+
+
 def render_short(
     source: Path,
     destination: Path,
@@ -85,12 +107,7 @@ def render_short(
     height = 1920 if resolution == 1080 else 1280
     width = 1080 if resolution == 1080 else 720
     if framing == "crop":
-        # Square the pixels first so the crop keeps the true display aspect ratio.
-        vf = (
-            "scale=w='trunc(iw*sar/2)*2':h='trunc(ih/2)*2',setsar=1,"
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setsar=1"
-        )
+        vf = fill_filter(width, height)
     else:
         # Fit the full display aspect ratio (including non-square source pixels), then
         # center it on the fixed export canvas. Even dimensions keep H.264 compatible.
@@ -101,13 +118,8 @@ def render_short(
         )
     workdir = None
     if captions_ass:
-        # Relative names inside a private directory avoid filtergraph path escaping.
-        workdir = tempfile.TemporaryDirectory(prefix="captions-", dir=destination.parent)
-        work = Path(workdir.name)
-        (work / "captions.ass").write_text(captions_ass, "utf-8")
-        if fonts_dir:
-            shutil.copytree(fonts_dir, work / "fonts", ignore=shutil.ignore_patterns("*.txt"))
-        vf += ",ass=captions.ass" + (":fontsdir=fonts" if fonts_dir else "")
+        workdir, ass_filter = caption_workdir(destination.parent, captions_ass, fonts_dir)
+        vf += "," + ass_filter
     command = [
         executable,
         "-hide_banner",

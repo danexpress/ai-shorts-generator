@@ -9,10 +9,13 @@ from ..models import Ok, PlaybackLink
 from ..social.security import SocialUser
 from ..story.models import (
     Story,
+    StoryAssets,
     StoryCreateRequest,
     StoryGenres,
     StoryList,
     StoryRegenerateRequest,
+    StoryRenderList,
+    StoryRenderRequest,
     StoryScriptUpdate,
     StoryVoiceRequest,
     StoryVoices,
@@ -92,3 +95,22 @@ def stream_voice(story_id: str, request: Request, expires: int, signature: str):
     if expires <= int(request.app.state.clock()) or not hmac.compare_digest(signature, expected):
         raise ApiError("UNAUTHENTICATED", "This playback link is invalid or expired.", 401)
     return stream_file(request, service(request).voice_file(story_id), "audio/wav")
+
+
+@router.get("/story-assets", response_model=StoryAssets, operation_id="listStoryAssets")
+def assets(request: Request, user: SocialUser):
+    """Backgrounds (bundled loops, your folder, your uploads), music and caption styles."""
+    return service(request).assets(user)
+
+
+@router.post("/stories/{id}/render", response_model=Story, operation_id="renderStory")
+def render(id: str, body: StoryRenderRequest, request: Request, user: SocialUser):
+    """Queue the final render; poll GET /v1/stories/{id} until status is "rendered"."""
+    return service(request).request_render(user, id, body.model_dump())
+
+
+@router.get(
+    "/stories/{id}/renders", response_model=StoryRenderList, operation_id="listStoryRenders"
+)
+def renders(id: str, request: Request, user: SocialUser):
+    return {"renders": service(request).renders(user, id)}

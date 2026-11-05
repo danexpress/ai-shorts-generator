@@ -12,4 +12,5 @@ GENRE = Genre(
     default_tone="vivid and authoritative",
     moods=("grounded", "tense", "dramatic", "reflective"),
     order=40,
+    default_background="forest",
 )

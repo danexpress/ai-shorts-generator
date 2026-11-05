@@ -144,7 +144,12 @@ class Store:
     def list_projects(self, user: UserRecord) -> list[dict]:
         projects = self.db.scalars(
             select(ProjectRecord)
-            .where(ProjectRecord.userId == user.id, ProjectRecord.status != "deleted")
+            .where(
+                ProjectRecord.userId == user.id,
+                ProjectRecord.status != "deleted",
+                # Story renders live on hidden projects; stories are listed separately.
+                ProjectRecord.sourceType != "story",
+            )
             .order_by(ProjectRecord.createdAt.desc(), ProjectRecord.id)
         )
         return [self.project_view(p) for p in projects]

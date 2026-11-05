@@ -169,7 +169,7 @@ class LoginResponse(Session):
 class Project(BaseModel):
     id: str
     name: str
-    sourceType: Literal["upload", "youtube_url"]
+    sourceType: Literal["upload", "youtube_url", "story"]
     status: ProjectState
     durationSec: float
     width: int

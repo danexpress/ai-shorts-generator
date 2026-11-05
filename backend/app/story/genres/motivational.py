@@ -11,4 +11,5 @@ GENRE = Genre(
     default_tone="warm and determined",
     moods=("low", "reflective", "rising", "triumphant"),
     order=30,
+    default_background="ember",
 )
