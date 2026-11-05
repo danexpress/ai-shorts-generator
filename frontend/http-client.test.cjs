@@ -840,7 +840,9 @@ function storyFixture(patch = {}) {
     voice: null, voiceJob: { request: null, progress: null, error: null },
     renderJob: { request: null, error: null },
     renderSettings: { background: { kind: 'bundled', id: 'midnight', name: null, projectId: null }, music: null, captionPreset: 'clean-bold', captions: true, titleCard: 'title' },
-    lastRenderId: null, ...patch,
+    lastRenderId: null,
+    usage: { script: { seconds: 4.2, inputTokens: 900, outputTokens: 300, cacheReadTokens: 0, costUsd: 0.03, cached: false }, voice: null, render: null, totalCostUsd: 0.03 },
+    ...patch,
   };
 }
 const VOICE = { provider: 'kokoro', voice: 'af_heart', speed: 0.8, durationSec: 31.2, tooLong: false, scenes: [], words: [], timingSources: ['provider'], characters: 300, costUsd: 0, cachedScenes: 0, loudness: { inputLufs: -25, outputLufs: -14.3 }, stale: false };
@@ -891,6 +893,7 @@ test('story tab writes, edits, voices and renders a story with clear step states
   assert.equal(v.canVoice, true);
   assert.equal(v.canRender, false);
   assert.match(v.wordLine, /^18 words · budget 65–75 · about \d+ s$/);
+  assert.equal(v.costLine, 'Script 4.2 s · $0.0300 — total $0.0300');
 
   // Unsaved edits block the voice until saved; saving sends the revision and the draft.
   v.editScene(1, 'narration', 'A brand new line here.');

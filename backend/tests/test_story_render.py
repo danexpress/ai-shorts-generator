@@ -122,14 +122,17 @@ def test_loop_background_crops_loops_trims_and_darkens(tmp_path):
     )
 
 
-def test_bundled_loops_are_generated_once(settings):
+def test_bundled_loops_are_generated_once(settings, monkeypatch):
+    runs = []
+    real_run = subprocess.run
+    monkeypatch.setattr(
+        visuals.subprocess, "run", lambda *a, **k: runs.append(1) or real_run(*a, **k)
+    )
     first = visuals.bundled_file(settings, FFMPEG, visuals.BUNDLED["ember"])
-    made = first.stat().st_mtime_ns
+    assert visuals.bundled_file(settings, FFMPEG, visuals.BUNDLED["ember"]) == first
+    assert len(runs) == 1  # the second request is a cache hit
     duration, info = probe(first)
     assert duration == pytest.approx(2 * visuals.HALF_LOOP, abs=0.1) and "1080x1920" in info
-    assert (
-        visuals.bundled_file(settings, FFMPEG, visuals.BUNDLED["ember"]).stat().st_mtime_ns == made
-    )
 
 
 def test_folder_backgrounds_cannot_escape_their_directory(settings, tmp_path):
@@ -407,3 +410,101 @@ def test_story_projects_disappear_with_the_account(client, headers, studio, data
     )
     assert response.status_code == 200, response.text
     assert rows(database, RenderRecord) == [] and rows(database, StoryRecord) == []
+
+
+# ---------- robustness: looping, cache pruning, cost tracking ----------
+
+
+def test_a_background_shorter_than_the_voice_loops_to_the_full_length(settings, tmp_path):
+    clip = tmp_path / "one-second.mp4"
+    command = [FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"]
+    command += ["-i", "testsrc2=s=640x360:d=1:r=30", "-pix_fmt", "yuv420p", str(clip)]
+    subprocess.run(command, check=True)  # landscape, 1 s: cropped to 9:16 and looped
+    voice = tmp_path / "voice.wav"
+    audio.write_wav(voice, audio.silence(3.2))
+    plan = StoryRenderPlan(visuals.LoopBackground(clip), voice, 3.2, [], [], None, None, False)
+    render_story(FFMPEG, plan, tmp_path / "out.mp4")
+    duration, info = probe(tmp_path / "out.mp4")
+    assert duration == pytest.approx(3.2 + OUTRO, abs=0.1) and "1080x1920" in info
+    frames = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(tmp_path / "out.mp4"), "-map", "0:v", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stderr
+    count = int(re.findall(r"frame=\s*(\d+)", frames)[-1])
+    assert count == pytest.approx((3.2 + OUTRO) * 30, abs=2)  # picture all the way through
+
+
+def test_cache_entries_unused_for_a_month_are_pruned(settings, clock):
+    import os
+
+    from app.story import cache
+
+    old = cache.file_path(settings.media_dir, "tts", {"a": 1}, ".wav")
+    used = cache.file_path(settings.media_dir, "tts", {"b": 2}, ".wav")
+    for path in (old, used):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        os.utime(path, (clock() - 40 * 86_400, clock() - 40 * 86_400))
+    cache.touch(used)  # a cache hit keeps it
+    os.utime(used, (clock(), clock()))
+    assert cache.prune(settings.media_dir, 30, now=clock()) == 1
+    assert not old.exists() and used.exists()
+    assert cache.prune(settings.media_dir, 0, now=clock()) == 0  # 0 disables pruning
+
+
+def test_the_worker_prunes_at_most_hourly_while_idle(
+    client, settings, database, clock, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr("app.story.cache.prune", lambda *args: calls.append(args) or 0)
+    worker = StoryWorker(database, settings, clock, providers={})
+    assert worker.run_once() is False and len(calls) == 1
+    clock.advance(600)
+    worker.run_once()
+    assert len(calls) == 1
+    clock.advance(3600)
+    worker.run_once()
+    assert len(calls) == 2 and calls[-1][1] == settings.story_cache_days
+
+
+def test_each_step_reports_its_time_and_cost_and_the_story_keeps_a_total(
+    client, headers, studio, database
+):
+    llm, worker = studio
+    llm.usage = Usage(calls=1, input_tokens=900, output_tokens=300, seconds=4.2, cost=0.03)
+    providers = studio[1].providers  # shared by the API and the worker
+    providers["demo"] = type("Paid", (CountingDemo,), {"cost_per_character": 0.0002})()
+    story = voiced_story(client, headers, studio)
+    usage = story["usage"]
+    assert usage["script"] == {
+        "seconds": 4.2,
+        "inputTokens": 900,
+        "outputTokens": 300,
+        "cacheReadTokens": 0,
+        "costUsd": 0.03,
+        "cached": False,
+    }
+    characters = sum(len(s["narration"]) for s in story["script"]["scenes"])
+    assert usage["voice"]["billedCharacters"] == characters
+    assert usage["voice"]["costUsd"] == pytest.approx(characters * 0.0002)
+    assert usage["totalCostUsd"] == pytest.approx(0.03 + characters * 0.0002)
+    render_request(client, headers, story)
+    worker.run_once()
+    rendered = client.get(f"/v1/stories/{story['id']}", headers=headers).json()["usage"]
+    assert rendered["render"]["seconds"] > 0 and rendered["render"]["costUsd"] == 0
+    assert rendered["totalCostUsd"] == usage["totalCostUsd"]  # rendering is local and free
+    # Asking for the same voice again is served from the cache: nothing more is billed.
+    body = {
+        "revision": client.get(f"/v1/stories/{story['id']}", headers=headers).json()["revision"]
+    }
+    client.post(
+        f"/v1/stories/{story['id']}/voice",
+        headers=headers,
+        json={**body, "provider": "demo", "voice": "low", "speed": 1.0},
+    )
+    worker.run_once()
+    again = client.get(f"/v1/stories/{story['id']}", headers=headers).json()["usage"]
+    assert again["voice"]["billedCharacters"] == 0 and again["voice"]["costUsd"] == 0
+    assert again["totalCostUsd"] == usage["totalCostUsd"]

@@ -528,6 +528,7 @@
         h(Badge, { status: s.current.status }),
       ),
       h(Steps, { steps: s.steps }),
+      s.costLine && h("p", { className: "small muted" }, s.costLine),
       h(ScriptStep, { s }),
       h(VoiceStep, { s }),
       h(RenderStep, { s }),

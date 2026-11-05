@@ -4151,6 +4151,8 @@ components:
           title: Lastrenderid
           type: string
           nullable: true
+        usage:
+          $ref: '#/components/schemas/StoryUsage'
       type: object
       required:
       - id
@@ -4174,6 +4176,7 @@ components:
       - renderJob
       - renderSettings
       - lastRenderId
+      - usage
       title: Story
     StoryAsset:
       properties:
@@ -4511,6 +4514,19 @@ components:
       - captions
       - titleCard
       title: StoryRenderSettings
+    StoryRenderUsage:
+      properties:
+        seconds:
+          type: number
+          title: Seconds
+        costUsd:
+          type: number
+          title: Costusd
+          default: 0.0
+      type: object
+      required:
+      - seconds
+      title: StoryRenderUsage
     StoryScene:
       properties:
         id:
@@ -4591,6 +4607,36 @@ components:
       - revision
       - script
       title: StoryScriptUpdate
+    StoryScriptUsage:
+      properties:
+        seconds:
+          type: number
+          title: Seconds
+        inputTokens:
+          type: integer
+          title: Inputtokens
+        outputTokens:
+          type: integer
+          title: Outputtokens
+        cacheReadTokens:
+          type: integer
+          title: Cachereadtokens
+        costUsd:
+          title: Costusd
+          type: number
+          nullable: true
+        cached:
+          type: boolean
+          title: Cached
+          default: false
+      type: object
+      required:
+      - seconds
+      - inputTokens
+      - outputTokens
+      - cacheReadTokens
+      - costUsd
+      title: StoryScriptUsage
     StorySummary:
       properties:
         id:
@@ -4636,6 +4682,28 @@ components:
       - createdAt
       - updatedAt
       title: StorySummary
+    StoryUsage:
+      properties:
+        script:
+          $ref: '#/components/schemas/StoryScriptUsage'
+          nullable: true
+        voice:
+          $ref: '#/components/schemas/StoryVoiceUsage'
+          nullable: true
+        render:
+          $ref: '#/components/schemas/StoryRenderUsage'
+          nullable: true
+        totalCostUsd:
+          type: number
+          title: Totalcostusd
+      type: object
+      required:
+      - script
+      - voice
+      - render
+      - totalCostUsd
+      title: StoryUsage
+      description: Latest run of each step, plus everything this story has cost so far.
     StoryVoice:
       properties:
         provider:
@@ -4814,6 +4882,27 @@ components:
       - voice
       - speed
       title: StoryVoiceSettings
+    StoryVoiceUsage:
+      properties:
+        seconds:
+          type: number
+          title: Seconds
+        characters:
+          type: integer
+          title: Characters
+        billedCharacters:
+          type: integer
+          title: Billedcharacters
+        costUsd:
+          type: number
+          title: Costusd
+      type: object
+      required:
+      - seconds
+      - characters
+      - billedCharacters
+      - costUsd
+      title: StoryVoiceUsage
     StoryVoices:
       properties:
         defaultProvider:

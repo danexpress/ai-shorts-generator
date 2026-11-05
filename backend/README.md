@@ -238,6 +238,22 @@ Measured end to end with no mocks (a topic → `claude-opus-5-5` → Kokoro `bm_
 - **Render:** 3.9 s, for a 45.1 s, 7 MB Short.
 - **Re-render:** 2.5 s, with the script and voice served from the cache.
 
+### Cost, time and cache
+
+- **Every step reports its own figures.** Each story's `usage` has the latest run of each step plus a running total, and the editor shows them under the stepper:
+  - **Script:** seconds, input/output/cached tokens and cost; a cache hit is marked `cached` and is free.
+  - **Voice:** seconds, characters and *billed* (uncached) characters, and cost.
+  - **Render:** seconds; rendering is local, so it's free.
+  - **Total:** `totalCostUsd` adds up every paid call the story has made, including regenerations.
+- **The same figures go to the logs,** one line per LLM call and per finished step, e.g.:
+  - `Story script written in 22.0s (mystery, 45s); LLM 1 call(s), … $0.0406`
+  - `Story voice: 5 scene(s), 44.3s of audio in 11.4s (kokoro/bm_fable, 0 cached), 581 characters billed, $0.0000, …`
+  - `Rendered story: 45.1s at 1080p … in 3.9s`
+- **Cache:**
+  - Scripts, scene audio and generated loops live in `MEDIA_DIR/story-cache/`, addressed by content hash.
+  - Every hit refreshes an entry. The processing worker prunes entries unused for `STORY_CACHE_DAYS` (default 30; `0` keeps everything), at most hourly and only while idle.
+  - Because entries are shared by content, deleting a story or account removes its voiceovers and renders straight away, but its cached scene audio can stay until that pruning.
+
 ### Adding a voice provider
 
 Subclass `TTSProvider` (`app/story/tts/base.py`) and register it in `PROVIDERS` (`app/story/tts/__init__.py`):

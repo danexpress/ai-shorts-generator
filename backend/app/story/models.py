@@ -197,6 +197,36 @@ class StoryAssets(BaseModel):
     captionPresets: list[StoryCaptionPreset]
 
 
+class StoryScriptUsage(BaseModel):
+    seconds: float
+    inputTokens: int
+    outputTokens: int
+    cacheReadTokens: int
+    costUsd: float | None
+    cached: bool = False
+
+
+class StoryVoiceUsage(BaseModel):
+    seconds: float
+    characters: int
+    billedCharacters: int
+    costUsd: float
+
+
+class StoryRenderUsage(BaseModel):
+    seconds: float
+    costUsd: float = 0.0
+
+
+class StoryUsage(BaseModel):
+    """Latest run of each step, plus everything this story has cost so far."""
+
+    script: StoryScriptUsage | None
+    voice: StoryVoiceUsage | None
+    render: StoryRenderUsage | None
+    totalCostUsd: float
+
+
 class StoryGenre(BaseModel):
     id: str
     label: str
@@ -232,6 +262,7 @@ class Story(BaseModel):
     renderJob: StoryRenderJob
     renderSettings: StoryRenderSettings
     lastRenderId: str | None
+    usage: StoryUsage
 
 
 class StorySummary(BaseModel):

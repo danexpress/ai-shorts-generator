@@ -48,6 +48,7 @@ def speak_scene(provider, request, scenes, index, settings, ffmpeg, transcriber_
     meta = cache.load(settings.media_dir, "tts", key)
     wav = cache.file_path(settings.media_dir, "tts", key, ".wav")
     if meta and wav.is_file():
+        cache.touch(wav)
         return audio.read_wav(wav), meta, True
     context = {
         "previous": scenes[index - 1]["narration"] if index else "",

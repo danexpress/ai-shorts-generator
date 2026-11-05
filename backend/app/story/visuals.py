@@ -107,6 +107,7 @@ def bundled_file(settings, ffmpeg: str, background: Bundled) -> Path:
     key = {"bundled": background.id, "version": BUNDLED_VERSION, "colors": background.colors}
     path = cache.file_path(settings.media_dir, "backgrounds", key, ".mp4")
     if path.is_file():
+        cache.touch(path)
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     c0, c1, c2 = background.colors

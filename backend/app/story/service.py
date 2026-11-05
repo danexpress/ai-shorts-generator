@@ -32,11 +32,19 @@ from .script import (
     word_budget,
 )
 from .tts import build_providers
-from .worker import remove_story_files, story_dir
+from .worker import add_cost, remove_story_files, story_dir
 
 logger = logging.getLogger(__name__)
 
 DOCUMENT_VERSION = 1
+FREE_SCRIPT = {
+    "seconds": 0.0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadTokens": 0,
+    "costUsd": 0.0,
+    "cached": False,
+}
 RENDER_KEYS = ("background", "music", "captionPreset", "captions", "titleCard")
 RATE_LIMIT = 6  # script generations (and voice requests) per creator per minute
 PLAYBACK_SECONDS = 30 * 60
@@ -107,6 +115,17 @@ def view(record: StoryRecord) -> dict:
         },
         "renderSettings": render_settings(document, saved=True),
         "lastRenderId": document.get("lastRenderId"),
+        "usage": usage_view(document.get("usage") or {}),
+    }
+
+
+def usage_view(usage: dict) -> dict:
+    """The last run of each step (time, tokens or characters, cost) and the story's total."""
+    return {
+        "script": usage.get("script"),
+        "voice": usage.get("voice"),
+        "render": usage.get("render"),
+        "totalCostUsd": round(usage.get("totalCostUsd", 0.0), 6),
     }
 
 
@@ -172,10 +191,10 @@ class StoryService:
         key = cache_key(request, model, self.settings.story_effort, extra)
         hit = cache.load(self.settings.media_dir, "scripts", key)
         if hit:
-            logger.info("Story script cache hit (%s, %ss)", request.genre, request.seconds)
-            return {**hit, "usage": None}
+            logger.info("Story script cache hit (%s, %ss): free", request.genre, request.seconds)
+            return {**hit, "usage": {**FREE_SCRIPT, "cached": True}}
         if model == "demo":
-            script, usage = demo_script(request), None
+            script, usage = demo_script(request), dict(FREE_SCRIPT)
         else:
             llm = self.model_factory()
             started = time.monotonic()
@@ -205,9 +224,10 @@ class StoryService:
                     "outputTokens": used.output_tokens,
                     "cacheReadTokens": used.cache_read_tokens,
                     "costUsd": None if used.cost is None else round(used.cost, 6),
+                    "cached": False,
                 }
                 if used
-                else None
+                else dict(FREE_SCRIPT)
             )
         result = {"script": script, "model": model, "prompt": PROMPT_VERSION}
         cache.save(self.settings.media_dir, "scripts", key, result)
@@ -245,7 +265,7 @@ class StoryService:
             "scriptModel": written["model"],
             "scriptPrompt": written["prompt"],
             "variant": 0,
-            "usage": {"script": written["usage"]},
+            "usage": add_cost({}, "script", written["usage"]),
             # Filled by later steps: voice, scene timings, background, music, style.
             "voice": None,
             "timings": None,
@@ -348,7 +368,7 @@ class StoryService:
                 "variant": variant,
                 "scriptModel": written["model"],
                 "scriptPrompt": written["prompt"],
-                "usage": {**document.get("usage", {}), "script": written["usage"]},
+                "usage": add_cost(document.get("usage") or {}, "script", written["usage"]),
             },
         )
 

@@ -42,6 +42,16 @@ const storyInitial = () => ({
   currentId: null, current: null, draft: null, dirty: false, busy: null, scriptError: null, loadError: null,
   voiceChoice: { provider: null, voice: null, speed: 1 }, renderChoice: null, audioUrl: null, audioFor: null, renders: [],
 });
+// "Script 4.2 s · $0.0300 · Voice 11.4 s · 581 chars · Render 3.9 s · Total $0.0300"
+const costLine = (u) => {
+  if (!u) return '';
+  const money = (n) => (n ? '$' + n.toFixed(4) : 'free');
+  const parts = [];
+  if (u.script) parts.push('Script ' + (u.script.cached ? 'cached, free' : u.script.seconds.toFixed(1) + ' s · ' + money(u.script.costUsd)));
+  if (u.voice) parts.push('Voice ' + u.voice.seconds.toFixed(1) + ' s · ' + u.voice.billedCharacters + ' new chars spoken · ' + money(u.voice.costUsd));
+  if (u.render) parts.push('Render ' + u.render.seconds.toFixed(1) + ' s');
+  return parts.length ? parts.join(' · ') + ' — total ' + money(u.totalCostUsd) : '';
+};
 const spokenWords = (text) => (text.match(/\S+/g) || []).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 
 class Component extends DCLogic {
@@ -859,6 +869,7 @@ class Component extends DCLogic {
       setRender: (patch) => this.storyState((x) => ({ renderChoice: { ...x.renderChoice, ...patch } })), render: () => this.renderStoryShort(),
       publish: (render) => this.openPublish({ ...render, storyId: cur.id }),
       remove: () => this.deleteStory(),
+      costLine: costLine(cur.usage),
     };
   }
 

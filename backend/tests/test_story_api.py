@@ -43,6 +43,7 @@ def test_create_writes_a_script_and_saves_the_project_document(client, headers, 
         "outputTokens": 300,
         "cacheReadTokens": 0,
         "costUsd": 0.0096,
+        "cached": False,
     }
     fetched = check(
         client.get(f"/v1/stories/{story['id']}", headers=headers), "/v1/stories/{id}", "get"

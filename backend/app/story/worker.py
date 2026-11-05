@@ -22,7 +22,7 @@ from ..errors import ApiError
 from ..renderer import RendererUnavailable, RenderFailed, ffmpeg_path
 from ..social.db_models import RenderContext
 from ..store import DAY, oid
-from . import music
+from . import cache, music
 from .audio import AudioFailed
 from .render import StoryRenderPlan, render_story
 from .tts import TTSFailed, TTSUnavailable, build_providers
@@ -32,6 +32,7 @@ from .voice import VoiceRequest, generate_voice
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+PRUNE_EVERY_SECONDS = 3600
 LEASE_SECONDS = 300
 RETRY_SECONDS = 30  # times the attempt number, when the provider is unavailable
 # Status while a job runs -> the document key holding its request.
@@ -51,6 +52,12 @@ def remove_story_files(media_dir: Path, story_id: str):
     path = story_dir(media_dir, story_id)
     if path.parent == root and path.is_dir():
         shutil.rmtree(path, ignore_errors=True)
+
+
+def add_cost(usage: dict, step: str, entry: dict) -> dict:
+    """Record a step's latest usage and add its cost to the story's running total."""
+    total = usage.get("totalCostUsd", 0.0) + (entry.get("costUsd") or 0.0)
+    return {**usage, step: entry, "totalCostUsd": round(total, 6)}
 
 
 def render_filename(title: str) -> str:
@@ -101,6 +108,7 @@ class StoryWorker:
         self._providers = providers
         self._transcriber = transcriber
         self.owner = oid("sworker")[:40]
+        self.pruned_at = None
 
     @property
     def providers(self):
@@ -153,9 +161,18 @@ class StoryWorker:
             raise Abandoned
         return record
 
+    def prune_cache(self):
+        """At most hourly, while idle: drop story cache entries nobody has used lately."""
+        now = self.clock()
+        if self.pruned_at is not None and now - self.pruned_at < PRUNE_EVERY_SECONDS:
+            return
+        self.pruned_at = now
+        cache.prune(self.settings.media_dir, self.settings.story_cache_days, now)
+
     def run_once(self) -> bool:
         claimed = self.claim()
         if not claimed:
+            self.prune_cache()
             return False
         story_id, status, request_id, attempt = claimed
         job = (story_id, status, request_id)
@@ -244,12 +261,11 @@ class StoryWorker:
             file=destination.name, requestId=request_id, scriptDigest=voice_request["scriptDigest"]
         )
         previous = (document.get("voice") or {}).get("file")
-        usage = {
-            **(document.get("usage") or {}),
-            "voice": {
-                key: result[key] for key in ("seconds", "characters", "billedCharacters", "costUsd")
-            },
-        }
+        usage = add_cost(
+            document.get("usage") or {},
+            "voice",
+            {key: result[key] for key in ("seconds", "characters", "billedCharacters", "costUsd")},
+        )
         try:
             self.complete(
                 job,
@@ -368,10 +384,11 @@ class StoryWorker:
                     },
                 )
             )
-            usage = {
-                **(record.document.get("usage") or {}),
-                "render": {"seconds": result["seconds"]},
-            }
+            usage = add_cost(
+                record.document.get("usage") or {},
+                "render",
+                {"seconds": result["seconds"], "costUsd": 0.0},
+            )
             record.document = {
                 **record.document,
                 "background": settings["background"],

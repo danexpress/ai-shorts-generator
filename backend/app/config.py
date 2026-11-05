@@ -106,6 +106,10 @@ class Settings:
     story_music_dir: str = field(
         default_factory=lambda: os.environ.get("STORY_MUSIC_DIR", "").strip()
     )
+    # Story cache entries (scripts, scene audio, generated loops) unused this long are pruned.
+    story_cache_days: float = field(
+        default_factory=lambda: float(os.environ.get("STORY_CACHE_DAYS", "30") or 30)
+    )
     job_lease_seconds: int = 300
     # Sign-in. Google OIDC is enabled when both client values are set.
     google_client_id: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLIENT_ID", ""))
