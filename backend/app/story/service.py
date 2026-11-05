@@ -11,7 +11,13 @@ import time
 from sqlalchemy import select
 
 from ..captions.presets import DEFAULT_PRESET, PRESETS
-from ..db_models import ProjectRecord, RenderRecord, StoryRecord
+from ..db_models import (
+    JobRecord,
+    ProjectRecord,
+    RenderRecord,
+    StoryRecord,
+    WorkerHeartbeatRecord,
+)
 from ..errors import ApiError
 from ..llm import ClaudeModel, InvalidOutput, LLMUnavailable
 from ..social.accounts import rate_limit
@@ -110,12 +116,14 @@ def view(record: StoryRecord) -> dict:
             ),
             "progress": record.progress if pending else None,
             "error": document.get("voiceError") if record.status == "voice_failed" else None,
+            "stalled": False,
         },
         "renderJob": {
             "request": render_settings(document) if record.status == "rendering" else None,
             # While AI pictures are drawn (0-0.9), then the encode; None for plain renders.
             "progress": record.progress if record.status == "rendering" else None,
             "error": document.get("renderError") if record.status == "render_failed" else None,
+            "stalled": False,
         },
         "images": images_view(document.get("images")),
         "renderSettings": render_settings(document, saved=True),
@@ -323,7 +331,40 @@ class StoryService:
 
     def get(self, user_id: str, story_id: str) -> dict:
         with self.database.sessions() as db:
-            return view(self.owned(db, user_id, story_id))
+            record = self.owned(db, user_id, story_id)
+            result = view(record)
+            if self.stalled(db, record):
+                key = "voiceJob" if record.status == "voicing" else "renderJob"
+                result[key]["stalled"] = True
+            return result
+
+    def stalled(self, db, record: StoryRecord) -> bool:
+        """A queued voice/render job that no up-to-date worker is around to pick up."""
+        from .worker import STALE_WORKER_SECONDS
+
+        if record.status not in ("voicing", "rendering") or record.leaseOwner:
+            return False
+        now = self.now()
+        if now - record.updatedAt < 20_000:  # just queued: give the worker a moment
+            return False
+        recent = now - STALE_WORKER_SECONDS * 1000
+        beating = db.scalar(
+            select(WorkerHeartbeatRecord.owner)
+            .where(WorkerHeartbeatRecord.seenAt >= recent)
+            .limit(1)
+        )
+        # A worker busy with a long job (FLUX pictures, a transcription) cannot beat, but
+        # holds a live lease on that job: it is alive and will get to this one next.
+        busy = db.scalar(
+            select(StoryRecord.id)
+            .where(StoryRecord.leaseOwner.is_not(None), StoryRecord.leaseUntil >= now)
+            .limit(1)
+        ) or db.scalar(
+            select(JobRecord.id)
+            .where(JobRecord.leaseOwner.is_not(None), JobRecord.leaseUntil >= now)
+            .limit(1)
+        )
+        return beating is None and busy is None
 
     def check_revision(self, record: StoryRecord, revision: int):
         if record.revision != revision:

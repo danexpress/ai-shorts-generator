@@ -4589,6 +4589,10 @@ components:
         error:
           $ref: '#/components/schemas/StoryJobError'
           nullable: true
+        stalled:
+          type: boolean
+          title: Stalled
+          default: false
       type: object
       required:
       - request
@@ -4957,6 +4961,10 @@ components:
         error:
           $ref: '#/components/schemas/StoryJobError'
           nullable: true
+        stalled:
+          type: boolean
+          title: Stalled
+          default: false
       type: object
       required:
       - request

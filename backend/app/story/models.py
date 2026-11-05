@@ -137,6 +137,8 @@ class StoryVoiceJob(BaseModel):
     request: StoryVoiceSettings | None
     progress: float | None
     error: StoryJobError | None
+    # Queued, but no up-to-date processing worker is running to pick it up.
+    stalled: bool = False
 
 
 class StoryBackgroundChoice(BaseModel):
@@ -175,6 +177,7 @@ class StoryRenderJob(BaseModel):
     request: StoryRenderSettings | None
     progress: float | None = None
     error: StoryJobError | None
+    stalled: bool = False
 
 
 class StorySceneImage(BaseModel):

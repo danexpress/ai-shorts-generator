@@ -15,6 +15,20 @@
     );
   }
 
+  // A queued job with no up-to-date worker running (e.g. one started before an update).
+  function Stalled() {
+    return h(
+      Notice,
+      { kind: "error" },
+      h("strong", null, "Nothing is picking this up."),
+      h(
+        "span",
+        null,
+        "The background worker isn’t running, or is an old copy from before an update. Restart the app: press Ctrl-C in the terminal running make run, then run make run again. Your request is kept and starts by itself.",
+      ),
+    );
+  }
+
   function Progress({ value, label }) {
     return h(
       "div",
@@ -355,6 +369,7 @@
           value: job.progress,
           label: `Generating the voice… ${pct(job.progress)} (scenes are spoken one by one)`,
         }),
+      voicing && job.stalled && h(Stalled),
       job.error && h(Notice, { kind: "error" }, `${job.error.message}`),
       voice &&
         h(
@@ -499,6 +514,7 @@
                 ? `Drawing scene pictures… ${pct(s.current.renderJob.progress / 0.9)}`
                 : "Pictures done. Rendering your Short…",
         }),
+      rendering && s.current.renderJob.stalled && h(Stalled),
       s.current.renderJob.error && h(Notice, { kind: "error" }, s.current.renderJob.error.message),
       h(
         "div",

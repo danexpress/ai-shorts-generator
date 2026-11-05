@@ -15,9 +15,15 @@ import time
 import uuid
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 
-from ..db_models import ProjectRecord, RenderRecord, StoryRecord, UserRecord
+from ..db_models import (
+    ProjectRecord,
+    RenderRecord,
+    StoryRecord,
+    UserRecord,
+    WorkerHeartbeatRecord,
+)
 from ..errors import ApiError
 from ..renderer import RendererUnavailable, RenderFailed, ffmpeg_path
 from ..social.db_models import RenderContext
@@ -35,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 PRUNE_EVERY_SECONDS = 3600
+HEARTBEAT_SECONDS = 10
+# A queued job with no worker seen this recently is reported as stalled.
+STALE_WORKER_SECONDS = 60
 LEASE_SECONDS = 300
 RETRY_SECONDS = 30  # times the attempt number, when the provider is unavailable
 # Status while a job runs -> the document key holding its request.
@@ -120,6 +129,8 @@ class StoryWorker:
         self._transcriber = transcriber
         self.owner = oid("sworker")[:40]
         self.pruned_at = None
+        self.started_at = None
+        self.beat_at = None
 
     @property
     def providers(self):
@@ -186,7 +197,25 @@ class StoryWorker:
         self.pruned_at = now
         cache.prune(self.settings.media_dir, self.settings.story_cache_days, now)
 
+    def beat(self):
+        """Record that this worker is alive (at most every HEARTBEAT_SECONDS)."""
+        now = self.now()
+        if self.beat_at is not None and now - self.beat_at < HEARTBEAT_SECONDS * 1000:
+            return
+        self.beat_at = now
+        self.started_at = self.started_at or now
+        with self.database.transaction() as db:
+            record = db.get(WorkerHeartbeatRecord, self.owner)
+            if record:
+                record.seenAt = now
+            else:
+                db.add(WorkerHeartbeatRecord(owner=self.owner, startedAt=now, seenAt=now))
+            db.execute(
+                delete(WorkerHeartbeatRecord).where(WorkerHeartbeatRecord.seenAt < now - 86_400_000)
+            )
+
     def run_once(self) -> bool:
+        self.beat()
         claimed = self.claim()
         if not claimed:
             self.prune_cache()

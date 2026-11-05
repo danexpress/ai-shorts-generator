@@ -70,7 +70,7 @@ def test_voice_is_generated_in_the_background_and_can_be_played(
     assert len(voice["words"]) == done["wordCount"] and voice["timingSources"] == ["provider"]
     assert [s["id"] for s in voice["scenes"]] == [s["id"] for s in done["script"]["scenes"]]
     assert voice["loudness"]["outputLufs"] == pytest.approx(-14, abs=0.6)
-    assert done["voiceJob"] == {"request": None, "progress": None, "error": None}
+    assert done["voiceJob"] == {"request": None, "progress": None, "error": None, "stalled": False}
 
     link = check(
         client.post(f"/v1/stories/{item['id']}/voice/playback", headers=headers),
@@ -247,3 +247,37 @@ def test_deleting_the_story_or_account_removes_voice_files(client, headers, voic
     )
     assert response.status_code == 200, response.text
     assert not story_dir(settings.media_dir, second["id"]).exists()
+
+
+def test_a_queued_voice_with_no_running_worker_is_reported_as_stalled(
+    client, headers, voices, clock, database
+):
+    demo, worker = voices
+    item = story(client, headers)
+    ask_voice(client, headers, item)
+    assert get(client, headers, item)["voiceJob"]["stalled"] is False  # just queued
+    clock.advance(30)
+    assert get(client, headers, item)["voiceJob"]["stalled"] is True  # no worker has ever run
+
+    # An up-to-date worker that is alive (heartbeat) clears it, even before claiming.
+    other = story(client, headers, seconds=45)
+    ask_voice(client, headers, other)
+    original = demo.synthesize
+    checked = []
+
+    def check_while_busy(*args):
+        # While the worker is busy with one story, the other is not stalled either.
+        clock.advance(120)  # long enough that the heartbeat itself is stale
+        checked.append(get(client, headers, other)["voiceJob"]["stalled"])
+        return original(*args)
+
+    demo.synthesize = check_while_busy
+    worker.run_once()
+    assert checked and not any(checked)
+    demo.synthesize = original
+    worker.beat()  # its next loop, a second later
+    assert get(client, headers, other)["voiceJob"]["stalled"] is False  # fresh heartbeat
+    clock.advance(61)
+    assert get(client, headers, other)["voiceJob"]["stalled"] is True  # the worker went away
+    worker.run_once()
+    assert get(client, headers, other)["status"] == "voiced"

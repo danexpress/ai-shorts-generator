@@ -209,6 +209,18 @@ class StoryRecord(Base):
     progress: Mapped[float | None] = mapped_column(Float)
 
 
+class WorkerHeartbeatRecord(Base):
+    """A running processing worker that can run Story Mode jobs, seen recently.
+
+    Lets the API tell a creator "no worker is running" instead of waiting forever,
+    e.g. when an old worker from before a code update is still the only one."""
+
+    __tablename__ = "worker_heartbeats"
+    owner: Mapped[str] = mapped_column(String(40), primary_key=True)
+    startedAt: Mapped[int] = mapped_column("started_at", BigInteger)
+    seenAt: Mapped[int] = mapped_column("seen_at", BigInteger, index=True)
+
+
 class AnalysisRunRecord(Base):
     __tablename__ = "analysis_runs"
     runId: Mapped[str] = mapped_column("run_id", String(40), primary_key=True)

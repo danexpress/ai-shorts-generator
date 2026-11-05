@@ -32,10 +32,11 @@ install:
 	cd "$(BACKEND_DIR)" && $(UV) sync --locked $(EXTRAS)
 
 # API plus the video processing worker: uploads are transcribed and analyzed by the
-# worker, so the two always run together. Ctrl-C stops both.
+# worker, so the two always run together. Ctrl-C stops both. Both reload when backend
+# code changes (uvicorn --reload; watchfiles restarts the worker).
 run:
 	cd "$(BACKEND_DIR)" && $(UV) sync --locked --quiet $(EXTRAS) && trap 'kill 0' INT TERM; \
-		$(UV) run --locked python -m app.jobs.worker & \
+		$(UV) run --locked watchfiles --filter python "python -m app.jobs.worker" app & \
 		$(UV) run --locked uvicorn app.main:app --reload --host "$(HOST)" --port "$(PORT)" & \
 		wait
 
