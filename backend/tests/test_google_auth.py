@@ -118,6 +118,13 @@ def test_start_requests_only_basic_scopes_with_pkce_and_browser_binding(gclient)
     assert gclient.get("/v1/auth/options").json() == {"google": True, "password": True}
 
 
+def test_start_moves_to_the_public_loopback_host_before_setting_the_cookie(gclient):
+    start = gclient.get("http://localhost:8000/v1/auth/google/start", follow_redirects=False)
+    assert start.status_code == 303
+    assert start.headers["location"] == "http://127.0.0.1:8000/v1/auth/google/start"
+    assert "set-cookie" not in start.headers
+
+
 def test_new_invited_user_is_created_by_sub_and_signed_in(gclient, idp, database):
     response = sign_in(gclient, idp)
     assert auth_error(response) is None

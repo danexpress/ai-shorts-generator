@@ -1,6 +1,7 @@
 import hmac
 import secrets
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -26,6 +27,7 @@ from ..social.security import SocialUser
 router = APIRouter(tags=["Authentication"])
 LOGIN_COOKIE = "shorts_login"  # binds a pending Google sign-in to this browser
 LOGIN_COOKIE_PATH = "/v1/auth/google"
+LOOPBACK = {"localhost", "127.0.0.1"}
 
 
 @router.get("/v1/auth/options", response_model=AuthOptions, operation_id="getAuthOptions")
@@ -57,6 +59,12 @@ def google_start(request: Request, store: StoreDep):
     google, settings = request.app.state.google, store.settings
     if not google.configured:
         return _to_frontend(settings, "GOOGLE_UNAVAILABLE")
+    public_host = urlparse(settings.backend_public_url).hostname
+    if request.url.hostname != public_host and {request.url.hostname, public_host} <= LOOPBACK:
+        # Google returns to the public host, and the login cookie must already be there.
+        return RedirectResponse(
+            f"{settings.backend_public_url}/v1/auth/google/start", status_code=303
+        )
     now = store.now()
     store.db.execute(delete(LoginStateRecord).where(LoginStateRecord.expiresAt <= now))
     state, nonce, browser = (secrets.token_urlsafe(32) for _ in range(3))
