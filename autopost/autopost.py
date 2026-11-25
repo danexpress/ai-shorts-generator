@@ -953,15 +953,22 @@ def cmd_auth(cfg: Config, args) -> int:
               "(see README) and save it there, or set YOUTUBE_CLIENT_SECRETS.", file=sys.stderr)
         return 1
     flow = InstalledAppFlow.from_client_secrets_file(str(cfg.client_secrets), SCOPES)
+    # Desktop clients accept any loopback port, so a browser sign-in on this machine uses a free one.
+    # Headless sign-in needs a known port for the SSH tunnel.
+    port = args.port if args.port is not None else (8765 if args.no_browser else 0)
     if args.no_browser:
-        print(f"Headless mode. On your laptop run:  ssh -L {args.port}:localhost:{args.port} <this-server>\n"
+        print(f"Headless mode. On your laptop run:  ssh -L {port}:localhost:{port} <this-server>\n"
               "then open the URL below in your laptop's browser.\n")
-    creds = flow.run_local_server(
-        host="localhost", port=args.port, open_browser=not args.no_browser,
-        authorization_prompt_message="Open this URL to authorize autopost:\n{url}\n",
-        success_message="autopost is authorized. You can close this tab.",
-        access_type="offline", prompt="consent",
-    )
+    try:
+        creds = flow.run_local_server(
+            host="localhost", port=port, open_browser=not args.no_browser,
+            authorization_prompt_message="Open this URL to authorize autopost:\n{url}\n",
+            success_message="autopost is authorized. You can close this tab.",
+            access_type="offline", prompt="consent",
+        )
+    except OSError as e:
+        print(f"Could not listen on localhost:{port} ({e.strerror}). Pick another port with --port.", file=sys.stderr)
+        return 1
     if not creds.refresh_token:
         print("Google returned no refresh token; remove the app at https://myaccount.google.com/permissions "
               "and run auth again.", file=sys.stderr)
@@ -1054,7 +1061,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = sub.add_parser("auth", help="authorize your YouTube channel (OAuth desktop flow)")
     a.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
-    a.add_argument("--port", type=int, default=8765, help="local port for the OAuth redirect (default 8765)")
+    a.add_argument("--port", type=int, default=None,
+                   help="local port for the OAuth redirect (default: any free port; 8765 with --no-browser)")
 
     r = sub.add_parser("run", help="process the inbox")
     mode = r.add_mutually_exclusive_group(required=True)
