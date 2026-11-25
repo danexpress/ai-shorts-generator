@@ -608,18 +608,77 @@ def load_credentials(cfg: Config):
         try:
             creds.refresh(Request())
         except RefreshError as e:
-            raise AuthError(f"could not refresh the YouTube token ({e}); run `autopost.py auth` again") from e
+            raise AuthError(
+                f"could not refresh the YouTube token ({e}). While the OAuth consent screen is in Testing, "
+                "Google ends the sign-in 7 days after `auth`; run `autopost.py auth` again"
+            ) from e
         save_token(cfg.token_path, creds.to_json())
     return creds
 
 
-def save_token(path: Path, data: str) -> None:
+AUTHORIZED_AT_KEY = "autopost_authorized_at"
+
+
+def token_authorized_at(path: Path) -> tuple[dt.datetime | None, bool]:
+    """When `auth` last ran, and whether that is estimated from the file's creation time."""
+    try:
+        stored = json.loads(path.read_text()).get(AUTHORIZED_AT_KEY)
+        if stored:
+            return parse_time(stored), False
+        st = path.stat()
+    except (OSError, ValueError):
+        return None, False
+    created = getattr(st, "st_birthtime", st.st_mtime)
+    return dt.datetime.fromtimestamp(created, dt.timezone.utc), True
+
+
+def save_token(path: Path, data: str, authorized_at: dt.datetime | None = None) -> None:
+    """Write token.json, keeping the time of the last `auth` across refreshes."""
+    token = json.loads(data)
+    if authorized_at is None:
+        authorized_at, _ = token_authorized_at(path)
+    if authorized_at is not None:
+        token[AUTHORIZED_AT_KEY] = iso(authorized_at)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(data)
+        f.write(json.dumps(token))
     os.replace(tmp, path)
+
+
+def token_expiry_days() -> float:
+    """Days a sign-in lasts. 7 while the consent screen is in Testing; 0 turns tracking off."""
+    try:
+        return float(os.environ.get("AUTOPOST_TOKEN_EXPIRY_DAYS", 7))
+    except ValueError:
+        return 7.0
+
+
+def token_status(cfg: Config, now: dt.datetime) -> tuple[str, bool]:
+    """A one-line description of the YouTube sign-in, and whether it needs attention."""
+    if not cfg.token_path.is_file():
+        return "not authorized; run `autopost.py auth`", True
+    authorized, estimated = token_authorized_at(cfg.token_path)
+    days = token_expiry_days()
+    if authorized is None:
+        return "token.json present (sign-in time unknown)", False
+    local = lambda t: t.astimezone().strftime("%b %d %H:%M")  # noqa: E731
+    since = f"signed in {local(authorized)}" + (" (estimated from the file date)" if estimated else "")
+    if days <= 0:
+        return f"{since}; expiry not tracked (AUTOPOST_TOKEN_EXPIRY_DAYS=0)", False
+    expires = authorized + dt.timedelta(days=days)
+    left = expires - now
+    if left <= dt.timedelta(0):
+        return (f"EXPIRED {local(expires)}: {since}, and a Testing app's sign-in lasts {days:g} days. "
+                "Run `autopost.py auth`"), True
+    if left <= dt.timedelta(days=1):
+        hours = max(1, round(left.total_seconds() / 3600))
+        return (f"WARNING: sign-in expires in about {hours}h ({local(expires)}). "
+                "Run `autopost.py auth` before then"), True
+    hours = round(left.total_seconds() / 3600)
+    return (f"{since}; expires {local(expires)} (in {hours // 24}d {hours % 24}h) "
+            "while the consent screen is in Testing"), False
 
 
 def youtube_client(cfg: Config):
@@ -890,6 +949,19 @@ def process_clip(cfg: Config, db: DB, clip: Path, state: dict[str, Any]) -> str:
     return "continue"
 
 
+def warn_token_expiry(cfg: Config, db: DB) -> None:
+    """Log the sign-in warning at most every 6 hours, so a service doesn't repeat it every pass."""
+    now = utcnow()
+    line, attention = token_status(cfg, now)
+    if not attention:
+        return
+    last = db.get_state("token_warned_at")
+    if last and now - parse_time(last) < dt.timedelta(hours=6):
+        return
+    log.warning("YouTube auth: %s", line)
+    db.set_state("token_warned_at", iso(now))
+
+
 def run_once(cfg: Config) -> int:
     for d in (cfg.inbox, cfg.posted, cfg.failed):
         d.mkdir(parents=True, exist_ok=True)
@@ -898,6 +970,8 @@ def run_once(cfg: Config) -> int:
             log.info("another run holds %s; skipping this tick", cfg.lock_path)
             return 0
         db = DB(cfg.db_path)
+        if not cfg.dry_run:
+            warn_token_expiry(cfg, db)
         clips = scan_inbox(cfg)
         if not clips:
             log.info("inbox is empty")
@@ -973,7 +1047,7 @@ def cmd_auth(cfg: Config, args) -> int:
         print("Google returned no refresh token; remove the app at https://myaccount.google.com/permissions "
               "and run auth again.", file=sys.stderr)
         return 1
-    save_token(cfg.token_path, creds.to_json())
+    save_token(cfg.token_path, creds.to_json(), authorized_at=utcnow())
     print(f"Saved {cfg.token_path} (mode 600). Keep it out of git.")
     return 0
 
@@ -1027,7 +1101,7 @@ def cmd_status(cfg: Config, args) -> int:
                if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in VIDEO_EXTS]
     counts = {r["status"]: r["n"] for r in db.conn.execute("SELECT status, COUNT(*) AS n FROM clips GROUP BY status")}
     print(f"home:          {cfg.home}")
-    print(f"auth:          {'token.json present' if cfg.token_path.is_file() else 'not authorized (run auth)'}")
+    print(f"auth:          {token_status(cfg, now)[0]}")
     print(f"uploads today: {today}/{cfg.max_per_day} (Pacific day)")
     print(f"next upload:   {'now' if blocked is None else blocked}")
     print(f"inbox:         {len(waiting)} clip(s)" + (f": {', '.join(waiting[:10])}" if waiting else ""))

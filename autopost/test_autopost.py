@@ -135,6 +135,65 @@ class LimitsTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class TokenExpiryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.cfg = autopost.Config(home=self.tmp)
+        self.now = autopost.utcnow()
+
+    def tearDown(self):
+        os.environ.pop("AUTOPOST_TOKEN_EXPIRY_DAYS", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def signed_in(self, days_ago: float):
+        autopost.save_token(self.cfg.token_path, json.dumps({"refresh_token": "r"}),
+                            authorized_at=self.now - autopost.dt.timedelta(days=days_ago))
+
+    def test_states(self):
+        line, attention = autopost.token_status(self.cfg, self.now)
+        self.assertTrue(attention)
+        self.assertIn("not authorized", line)
+
+        self.signed_in(1)
+        line, attention = autopost.token_status(self.cfg, self.now)
+        self.assertFalse(attention)
+        self.assertIn("(in 6d 0h)", line)
+
+        self.signed_in(6.5)
+        line, attention = autopost.token_status(self.cfg, self.now)
+        self.assertTrue(attention)
+        self.assertIn("WARNING: sign-in expires in about 12h", line)
+
+        self.signed_in(8)
+        line, attention = autopost.token_status(self.cfg, self.now)
+        self.assertTrue(attention)
+        self.assertTrue(line.startswith("EXPIRED"))
+
+        os.environ["AUTOPOST_TOKEN_EXPIRY_DAYS"] = "0"
+        self.assertFalse(autopost.token_status(self.cfg, self.now)[1])
+
+    def test_refresh_keeps_sign_in_time_and_falls_back_to_file_date(self):
+        self.signed_in(3)
+        first = json.loads(self.cfg.token_path.read_text())[autopost.AUTHORIZED_AT_KEY]
+        autopost.save_token(self.cfg.token_path, json.dumps({"refresh_token": "r", "token": "new"}))
+        self.assertEqual(json.loads(self.cfg.token_path.read_text())[autopost.AUTHORIZED_AT_KEY], first)
+        self.assertEqual(self.cfg.token_path.stat().st_mode & 0o777, 0o600)
+
+        self.cfg.token_path.write_text(json.dumps({"refresh_token": "r"}))  # a token from before tracking
+        when, estimated = autopost.token_authorized_at(self.cfg.token_path)
+        self.assertTrue(estimated)
+        self.assertLess(abs((when - self.now).total_seconds()), 60)
+
+    def test_run_warns_at_most_every_six_hours(self):
+        self.signed_in(6.9)
+        db = autopost.DB(self.cfg.db_path)
+        with self.assertLogs("autopost", "WARNING") as logs:
+            autopost.warn_token_expiry(self.cfg, db)
+            autopost.warn_token_expiry(self.cfg, db)
+            autopost.log.warning("end")
+        self.assertEqual(sum("sign-in expires" in m for m in logs.output), 1)
+
+
 class FakeResp(dict):
     def __init__(self, status):
         super().__init__(status=str(status))

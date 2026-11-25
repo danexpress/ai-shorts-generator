@@ -40,6 +40,7 @@ You also need `ffmpeg` and `ffprobe` on the PATH (`brew install ffmpeg` or `apt 
    - Audience: choose **External**. Under **Test users**, add the Google account that owns your channel.
    - Data Access: add the scope `https://www.googleapis.com/auth/youtube.upload`.
    - While the app's publishing status is **Testing**, Google expires the refresh token **7 days** after you sign in, and autopost would stop with an auth error each week. For a tool only you use, click **Publish app** to move it to **In production**. You'll see an "unverified app" warning when you sign in. Click **Advanced → Go to (app)**. Without verification, sign-in is limited to 100 users, which is enough for one channel.
+   - If you stay in Testing, run `auth` again each week. `status` shows when the sign-in expires. Within a day of expiry, `status` prints a warning and `run` logs one at most every 6 hours. After you publish the app, set `AUTOPOST_TOKEN_EXPIRY_DAYS=0` to turn this off.
 4. **Create a Desktop client.** Open **Clients** (or **Credentials → Create credentials → OAuth client ID**) and choose application type **Desktop app**. Download the JSON and save it as `autopost/client_secret.json`, or point `YOUTUBE_CLIENT_SECRETS` at it. Git ignores this file.
 5. **Authorize.**
 
@@ -149,7 +150,7 @@ journalctl -u autopost -f
 | Any other upload error | Recorded. The clip is retried on the next pass and moved to `failed/` after 3 attempts. |
 | `quotaExceeded`, `uploadLimitExceeded` or `dailyLimitExceeded` | No attempt is counted. All uploads pause until 00:05 Pacific the next day. |
 | Thumbnail rejected (custom thumbnails need a verified channel) | Logged; the post still succeeds |
-| Token expired or revoked | The pass stops with an auth error; run `auth` again |
+| Token expired or revoked | The pass stops with an auth error; run `auth` again. `status` and `run` warn a day before a Testing app's 7-day sign-in ends. |
 | YouTube returns a different privacy than requested | Logged as a warning |
 
 Every attempt goes to the `events` table. The `clips` table holds the video ID, title, status, attempts and last error:
