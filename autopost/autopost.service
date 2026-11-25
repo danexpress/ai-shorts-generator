@@ -1,0 +1,31 @@
+# Install: sudo cp autopost.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now autopost
+# Logs:    journalctl -u autopost -f   (also /opt/autopost/autopost.log)
+[Unit]
+Description=autopost: title and upload new clips to YouTube
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=autopost
+Group=autopost
+WorkingDirectory=/opt/autopost
+Environment=AUTOPOST_HOME=/opt/autopost
+Environment=PYTHONUNBUFFERED=1
+# Holds ANTHROPIC_API_KEY and AUTOPOST_MODEL; chmod 600, owned by the autopost user.
+EnvironmentFile=-/opt/autopost/.env
+ExecStart=/opt/autopost/.venv/bin/python /opt/autopost/autopost.py run --loop --interval 300 --privacy private
+Restart=on-failure
+RestartSec=60
+TimeoutStopSec=900
+
+# Hardening: the service only needs to write inside its home directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/autopost
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# Secrets
+.env
+client_secret*.json
+token.json
+# Runtime state
+inbox/
+posted/
+failed/
+duplicates/
+autopost.db
+autopost.log*
+autopost.lock
+.venv/
+__pycache__/
