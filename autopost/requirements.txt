@@ -1,0 +1,6 @@
+anthropic>=2.14,<3
+google-api-python-client>=2.202,<3
+google-auth>=2.63,<3
+google-auth-oauthlib>=1.5,<2
+google-auth-httplib2>=0.4,<1
+httplib2>=0.32,<1
