@@ -254,6 +254,7 @@ class UploadPathTest(unittest.TestCase):
         make_clip(self.cfg.inbox / "clip.mp4")
         (self.cfg.inbox / "clip.json").write_text(json.dumps({"title": "Hello", "tags": ["a"]}))
         (self.cfg.inbox / "clip.jpg").write_bytes(b"\xff\xd8\xff")
+        autopost.save_token(self.cfg.token_path, json.dumps({"refresh_token": "r"}), authorized_at=autopost.utcnow())
         self._sleep = autopost.time.sleep
         autopost.time.sleep = lambda s: None
         self._client = autopost.youtube_client
